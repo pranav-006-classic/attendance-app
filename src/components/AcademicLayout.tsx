@@ -19,8 +19,8 @@ import {
   Menu,
   X
 } from 'lucide-react';
-import { User } from '../types';
-import { DEMO_TEACHER, DEMO_CRS, DEMO_STUDENTS } from '../data/demoData';
+import { UserProfile as User } from '../types';
+import { DEMO_TEACHER, DEMO_CRS, DEMO_STUDENTS } from '../demoData';
 
 interface AcademicLayoutProps {
   currentUser: User;

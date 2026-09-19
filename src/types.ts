@@ -24,6 +24,8 @@ export interface UserProfile {
   registeredAt?: string;
 }
 
+export type User = UserProfile;
+
 export interface Subject {
   id: string;
   code: string;

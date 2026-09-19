@@ -99,20 +99,14 @@ export const LeaveApplicationScreen: React.FC<LeaveApplicationScreenProps> = ({
       const mappedType: RequestType = 'leave';
       const subjectObj = subjects.find((s) => s.id === selectedSubjectId);
 
-      const payload = {
-        studentId: currentUser.id,
-        studentName: currentUser.name,
-        rollNumber: currentUser.rollNumber || 'CS2026-00',
-        date: startDate,
+      await submitLeaveRequest({
+        student: currentUser,
+        startDate,
         endDate: leaveScope === 'full_day' ? endDate : startDate,
         period: leaveScope === 'specific_period' ? selectedPeriod : undefined,
-        subjectId: leaveScope === 'specific_period' ? selectedSubjectId : undefined,
-        subjectName: leaveScope === 'specific_period' && subjectObj ? subjectObj.name : undefined,
         reason: `[${requestCategory.toUpperCase()}] ${reason}`,
         attachmentName: attachmentName || (requestCategory !== 'leave' ? 'Official_Event_Sanction.pdf' : undefined),
-      };
-
-      await submitLeaveRequest(currentUser, payload);
+      });
       setSubmitSuccess(true);
       setReason('');
       setAttachmentName('');
