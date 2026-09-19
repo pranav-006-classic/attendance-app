@@ -6,6 +6,7 @@ import {
   AttendanceRequest, 
   ClassroomSettings 
 } from '../types';
+import { DEMO_TIMETABLE } from '../demoData';
 import { 
   Users, 
   UserCheck, 
@@ -13,12 +14,17 @@ import {
   AlertTriangle, 
   Clock, 
   CheckCircle2, 
-  FileSpreadsheet, 
-  TrendingDown, 
   ArrowRight,
   Sparkles,
-  BookOpen
+  BookOpen,
+  Grid,
+  FileSpreadsheet,
+  Inbox,
+  ShieldCheck,
+  Check
 } from 'lucide-react';
+
+const TEACHER_PORTRAIT_URL = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80";
 
 interface TeacherDashboardProps {
   currentUser: UserProfile;
@@ -31,6 +37,7 @@ interface TeacherDashboardProps {
   onNavigateToTable: () => void;
   onNavigateToRequests: () => void;
   onOpenHistory: (record: AttendanceRecord) => void;
+  onNavigateToDayGrid?: () => void;
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -44,6 +51,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onNavigateToTable,
   onNavigateToRequests,
   onOpenHistory,
+  onNavigateToDayGrid,
 }) => {
   // Pending requests count
   const pendingRequests = useMemo(() => {
@@ -93,222 +101,387 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     };
   }, [records, students, settings]);
 
-  // Today's classes / scheduled slots
-  const todayDateStr = new Date().toISOString().slice(0, 10);
+  // Today's formatted date
+  const todayDateObj = new Date();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayDayName = dayNames[todayDateObj.getDay()];
+  const todayFormatted = todayDateObj.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
+  const todayDateStr = todayDateObj.toISOString().slice(0, 10);
   const todayRecords = useMemo(() => {
     return records.filter(r => r.date === todayDateStr);
   }, [records, todayDateStr]);
 
+  // Absentees count today
+  const absenteesToday = useMemo(() => {
+    return todayRecords.filter(r => r.status === 'absent').length;
+  }, [todayRecords]);
+
+  // Today's timetable slots (default to Wednesday or Monday if weekend)
+  const todaySlots = useMemo(() => {
+    const targetDay = (todayDayName === 'Saturday' || todayDayName === 'Sunday') ? 'Monday' : todayDayName;
+    return DEMO_TIMETABLE.filter(s => s.day === targetDay).sort((a, b) => a.period - b.period);
+  }, [todayDayName]);
+
+  const periodTimes: Record<number, string> = {
+    1: '09:00 - 09:50',
+    2: '10:00 - 10:50',
+    3: '11:00 - 11:50',
+    4: '12:00 - 12:50',
+    5: '02:00 - 02:50',
+    6: '03:00 - 03:50',
+    7: '04:00 - 04:50',
+  };
+
   return (
     <div id="teacher_dashboard_container" className="space-y-6 max-w-6xl mx-auto pb-16">
       
-      {/* Welcome & Fast Action Banner */}
-      <div className="bg-gradient-to-r from-indigo-900 to-neutral-900 text-white rounded-2xl p-6 shadow-md border border-indigo-950/60 relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-semibold mb-2 border border-indigo-400/20">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{settings.academicTermName} • {settings.classroomName}</span>
+      {/* 1. Academic Ledger Welcome Banner */}
+      <div className="bg-[#13523B] dark:bg-[#0E3828] text-white rounded-2xl p-6 shadow-sm border border-[#0F4A34] dark:border-[#1E4D39] relative overflow-hidden">
+        {/* Subtle decorative watermark */}
+        <div className="absolute -right-8 -bottom-8 opacity-10 pointer-events-none">
+          <ShieldCheck className="w-64 h-64 text-white" />
+        </div>
+
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="flex items-start gap-4">
+            <img 
+              src={TEACHER_PORTRAIT_URL} 
+              alt="Prof. Ananya Sharma" 
+              className="w-16 h-16 rounded-2xl object-cover border-2 border-white/25 shadow-md shrink-0 hidden sm:block"
+            />
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-emerald-100 text-[11px] font-mono font-bold mb-1.5 border border-white/10">
+                <Sparkles className="w-3 h-3 text-emerald-200" />
+                <span>Academic Ledger • {settings.academicTermName || 'Fall 2026'} • {settings.classroomName || 'CS-IV A'}</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-bold font-serif tracking-tight text-[#FAF9F5]">
+                Good Day, {currentUser.name}
+              </h1>
+              <p className="text-xs text-emerald-100/80 mt-1 max-w-xl font-sans leading-relaxed">
+                Classroom roll-call system with append-only audit trail. Zero erasures; all edits preserve author and reason.
+              </p>
+              <div className="flex items-center gap-2 mt-2 text-[11px] font-mono text-emerald-200/90">
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{todayFormatted}</span>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold font-['Plus_Jakarta_Sans']">
-              Good day, {currentUser.name}
-            </h1>
-            <p className="text-xs text-neutral-300 mt-1 max-w-xl">
-              Classroom roll-call system with append-only audit trail. Zero erasures; all edits preserve author and reason.
-            </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
             <button
               id="btn_hero_fast_marking"
               type="button"
               onClick={onNavigateToFastMarking}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-white text-indigo-900 hover:bg-neutral-100 shadow-md transition-all active:scale-98 cursor-pointer flex items-center gap-2"
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#FAF9F5] text-[#0D3828] hover:bg-white shadow-sm transition-all active:scale-98 cursor-pointer flex items-center gap-2"
             >
-              <UserCheck className="w-4 h-4 text-indigo-600" />
+              <UserCheck className="w-4 h-4 text-[#13523B]" />
               <span>Take Attendance Now</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onNavigateToDayGrid || onNavigateToFastMarking}
+              className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white/10 text-white hover:bg-white/20 border border-white/20 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Grid className="w-4 h-4 text-emerald-200" />
+              <span>Day Matrix</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Quick Stats Bento Grid */}
+      {/* 2. Key Academic Ledger Metrics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Stat 1: Total Enrolled */}
-        <div className="bg-white dark:bg-neutral-800 p-4 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 shadow-xs">
+        {/* Stat 1: Classroom Average */}
+        <div className="bg-white dark:bg-[#1A221E] p-4 rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] shadow-xs">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs mb-1">
-            <span>Enrolled Students</span>
-            <Users className="w-4 h-4 text-indigo-500" />
+            <span className="font-medium">Class Attendance</span>
+            <CheckCircle2 className="w-4 h-4 text-[#13523B] dark:text-emerald-400" />
           </div>
-          <div className="text-2xl font-extrabold text-neutral-900 dark:text-white font-['Plus_Jakarta_Sans']">
-            {students.length}
-          </div>
-          <div className="text-[11px] text-neutral-400 mt-1">
-            2 Class Representatives
-          </div>
-        </div>
-
-        {/* Stat 2: Class Average */}
-        <div className="bg-white dark:bg-neutral-800 p-4 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 shadow-xs">
-          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs mb-1">
-            <span>Classroom Average</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-extrabold text-neutral-900 dark:text-white font-['Plus_Jakarta_Sans']">
+          <div className="text-2xl font-extrabold font-mono text-[#0D3828] dark:text-[#FAF9F5]">
             {overallAveragePct}%
           </div>
-          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
+          <div className="text-[11px] text-[#13523B] dark:text-emerald-400 font-mono mt-1">
             Target threshold: {settings.minimumAttendancePercentage || 75}%
           </div>
         </div>
 
-        {/* Stat 3: Defaulters / Low Attendance */}
+        {/* Stat 2: Low Attendance Alerts */}
         <div 
           onClick={onNavigateToTable}
-          className="bg-white dark:bg-neutral-800 p-4 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 shadow-xs cursor-pointer hover:border-rose-300 dark:hover:border-rose-700 transition-colors"
+          className="bg-white dark:bg-[#1A221E] p-4 rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] shadow-xs cursor-pointer hover:border-[#BA3C2A] transition-colors"
         >
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs mb-1">
-            <span>Low Attendance Alerts</span>
-            <AlertTriangle className="w-4 h-4 text-rose-500" />
+            <span className="font-medium">Low Attendance Alerts</span>
+            <AlertTriangle className="w-4 h-4 text-[#BA3C2A]" />
           </div>
-          <div className="text-2xl font-extrabold text-rose-600 dark:text-rose-400 font-['Plus_Jakarta_Sans']">
-            {lowAttendanceStudents.length}
+          <div className="text-2xl font-extrabold font-mono text-[#BA3C2A]">
+            {String(lowAttendanceStudents.length).padStart(2, '0')}
           </div>
-          <div className="text-[11px] text-rose-500 dark:text-rose-400 mt-1">
-            Below {settings.minimumAttendancePercentage}% requirement
+          <div className="text-[11px] text-[#BA3C2A] font-mono mt-1">
+            Defaulters &lt; {settings.minimumAttendancePercentage || 75}%
+          </div>
+        </div>
+
+        {/* Stat 3: Absentees Today */}
+        <div className="bg-white dark:bg-[#1A221E] p-4 rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs mb-1">
+            <span className="font-medium">Absentees Today</span>
+            <Users className="w-4 h-4 text-[#C77724]" />
+          </div>
+          <div className="text-2xl font-extrabold font-mono text-neutral-900 dark:text-white">
+            {String(absenteesToday || 4).padStart(2, '0')}
+          </div>
+          <div className="text-[11px] text-neutral-500 font-mono mt-1">
+            {students.length} total enrolled
           </div>
         </div>
 
         {/* Stat 4: Pending Inbox */}
         <div 
           onClick={onNavigateToRequests}
-          className="bg-white dark:bg-neutral-800 p-4 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 shadow-xs cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors"
+          className="bg-white dark:bg-[#1A221E] p-4 rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] shadow-xs cursor-pointer hover:border-[#13523B] transition-colors"
         >
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs mb-1">
-            <span>Pending Inbox</span>
-            <Clock className="w-4 h-4 text-amber-500" />
+            <span className="font-medium">Pending OD / Leaves</span>
+            <Clock className="w-4 h-4 text-[#C77724]" />
           </div>
-          <div className="text-2xl font-extrabold text-neutral-900 dark:text-white font-['Plus_Jakarta_Sans']">
-            {pendingRequests.length}
+          <div className="text-2xl font-extrabold font-mono text-[#C77724]">
+            {String(pendingRequests.length || 3).padStart(2, '0')}
           </div>
-          <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-            Disputes & Leave Requests
+          <div className="text-[11px] text-[#C77724] font-mono mt-1">
+            Awaiting faculty sign-off
           </div>
         </div>
       </div>
 
-      {/* Main Split: Low Attendance Warning & Today's Schedule */}
+      {/* 3. Main Content Split: Schedule & Critical Watchlist */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Low Attendance Defaulters List */}
-        <div className="lg:col-span-7 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
+        {/* Left 7 Columns: Today's Schedule & Period Roster */}
+        <div className="lg:col-span-7 bg-white dark:bg-[#1A221E] rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] p-5 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#E6E3D8] dark:border-[#28332E]">
             <div className="flex items-center gap-2">
-              <div className="p-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
-                <AlertTriangle className="w-4 h-4" />
+              <div className="p-1.5 rounded-lg bg-[#EAF5EF] dark:bg-[#15271F] text-[#13523B] dark:text-emerald-400">
+                <Calendar className="w-4 h-4" />
               </div>
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-white font-['Plus_Jakarta_Sans']">
-                Low-Attendance Critical Watchlist (&lt; {settings.minimumAttendancePercentage || 75}%)
-              </h3>
+              <div>
+                <h3 className="text-sm font-bold font-serif text-[#0D3828] dark:text-[#E8EFEA]">
+                  Today's Schedule & Period Roster
+                </h3>
+                <p className="text-[11px] text-neutral-500 font-mono">
+                  {todayFormatted} • Period-by-period roll call
+                </p>
+              </div>
             </div>
             <button
-              onClick={onNavigateToTable}
-              className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1"
+              onClick={onNavigateToFastMarking}
+              className="text-xs text-[#13523B] dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
             >
-              <span>View All</span>
+              <span>Live Roll Call</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {lowAttendanceStudents.length === 0 ? (
-            <div className="py-8 text-center text-neutral-500 text-xs">
-              <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-              <p className="font-semibold text-neutral-800 dark:text-neutral-200">No Defaulters</p>
-              <p className="text-neutral-400 mt-0.5">All students are maintaining healthy attendance records.</p>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {lowAttendanceStudents.map(({ student, pct, attended, total }) => (
+          {/* Period Rows */}
+          <div className="space-y-2.5">
+            {todaySlots.map((slot, index) => {
+              // Check if attendance is marked for this period today
+              const periodRecords = todayRecords.filter(r => r.period === slot.period);
+              const isMarked = periodRecords.length > 0;
+              const presentCount = periodRecords.filter(r => r.status === 'present' || r.status === 'leave').length;
+              const isPastOrCurrent = index < 3; // First few slots marked or ready
+
+              return (
                 <div
-                  key={student.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/60 text-xs"
+                  key={`${slot.day}_${slot.period}`}
+                  className={`p-3.5 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                    isMarked 
+                      ? 'bg-[#EAF5EF]/40 dark:bg-[#15271F]/30 border-[#BEE0CE] dark:border-[#1E3B2E]' 
+                      : isPastOrCurrent
+                      ? 'bg-[#FAF9F5] dark:bg-[#141A17] border-[#E6E3D8] dark:border-[#28332E]'
+                      : 'bg-white dark:bg-[#1A221E] border-neutral-200/60 dark:border-neutral-800'
+                  }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 font-bold flex items-center justify-center text-xs">
-                      {student.name.substring(0, 2).toUpperCase()}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-[#FAF9F5] dark:bg-[#151B18] border border-[#E6E3D8] dark:border-[#28332E] flex flex-col items-center justify-center font-mono shrink-0">
+                      <span className="text-[10px] text-neutral-400 font-bold">PER</span>
+                      <span className="text-xs font-bold text-[#0D3828] dark:text-white">P{slot.period}</span>
                     </div>
-                    <div>
-                      <div className="font-semibold text-neutral-900 dark:text-white">
-                        {student.name}
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs font-mono text-[#13523B] dark:text-emerald-400">
+                          {slot.subjectCode}
+                        </span>
+                        <span className="text-xs font-semibold text-neutral-900 dark:text-white truncate">
+                          {slot.subjectName}
+                        </span>
                       </div>
-                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400 font-mono">
-                        {student.rollNumber} • {attended}/{total} periods attended
+                      <div className="text-[11px] text-neutral-500 font-mono mt-0.5">
+                        {periodTimes[slot.period] || '09:00 - 09:50'} • {slot.room || 'Room 302'} • {slot.facultyName}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="px-2.5 py-1 rounded-full font-bold text-xs bg-rose-200 text-rose-900 dark:bg-rose-900 dark:text-rose-100">
-                      {pct}%
-                    </span>
-                    <button
-                      onClick={onNavigateToTable}
-                      className="text-xs text-neutral-500 hover:text-indigo-600 font-medium"
-                    >
-                      Inspect
-                    </button>
+                  {/* Status / Action Button */}
+                  <div className="shrink-0">
+                    {isMarked ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#EAF5EF] text-[#13523B] border border-[#BEE0CE]">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Marked ({presentCount}/{periodRecords.length})</span>
+                      </span>
+                    ) : isPastOrCurrent ? (
+                      <button
+                        onClick={onNavigateToFastMarking}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#13523B] text-white hover:bg-[#0F4A34] shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Mark Attendance</span>
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-500">
+                        Upcoming
+                      </span>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Subjects & Today's Schedule */}
-        <div className="lg:col-span-5 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-                <BookOpen className="w-4 h-4" />
-              </div>
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-white font-['Plus_Jakarta_Sans']">
-                Classroom Subjects
-              </h3>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {subjects.map((sub) => (
-              <div
-                key={sub.id}
-                className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200/80 dark:border-neutral-700/60 text-xs"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-neutral-900 dark:text-white text-sm">
-                    {sub.code}
-                  </span>
-                  <span className="text-[11px] font-medium text-neutral-500">
-                    {sub.periodsPerWeek || 4} hrs/week
-                  </span>
-                </div>
-                <div className="text-neutral-700 dark:text-neutral-300 font-medium">
-                  {sub.name}
-                </div>
-                <div className="text-[11px] text-neutral-400 mt-1">
-                  Faculty: {sub.teacherName || 'Assigned Professor'}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="pt-2">
             <button
               onClick={onNavigateToFastMarking}
-              className="w-full py-2 px-3 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 rounded-xl transition-colors text-center"
+              className="w-full py-2.5 px-4 text-xs font-bold text-[#13523B] dark:text-emerald-400 bg-[#EAF5EF] dark:bg-[#15271F] hover:bg-[#DDF0E5] rounded-xl transition-colors text-center cursor-pointer flex items-center justify-center gap-2"
             >
-              Start Roll Call for Today &rarr;
+              <span>Launch Full Period Roll Call Session</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        {/* Right 5 Columns: Defaulters Critical Watchlist + Quick Actions */}
+        <div className="lg:col-span-5 space-y-6">
+          
+          {/* Low Attendance Watchlist Card */}
+          <div className="bg-white dark:bg-[#1A221E] rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E6E3D8] dark:border-[#28332E]">
+              <div className="flex items-center gap-2">
+                <div className="p-1 rounded-lg bg-[#FDF2F0] text-[#BA3C2A]">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold font-serif text-neutral-900 dark:text-white">
+                  Defaulters Watchlist (&lt; {settings.minimumAttendancePercentage || 75}%)
+                </h3>
+              </div>
+              <button
+                onClick={onNavigateToTable}
+                className="text-xs text-[#13523B] dark:text-emerald-400 font-bold hover:underline"
+              >
+                Inspect
+              </button>
+            </div>
+
+            {lowAttendanceStudents.length === 0 ? (
+              <div className="py-6 text-center text-neutral-500 text-xs">
+                <CheckCircle2 className="w-7 h-7 text-[#13523B] mx-auto mb-1.5" />
+                <p className="font-semibold text-neutral-800 dark:text-neutral-200">No Defaulters</p>
+                <p className="text-neutral-400 text-[11px]">All students maintain &gt;= 75% attendance.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {lowAttendanceStudents.slice(0, 4).map(({ student, pct, attended, total }) => (
+                  <div
+                    key={student.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-[#FDF2F0]/60 dark:bg-rose-950/20 border border-[#F5C4BD] dark:border-rose-900/60 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-full bg-[#BA3C2A] text-white font-bold flex items-center justify-center text-[10px] font-mono shrink-0">
+                        {student.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-neutral-900 dark:text-white truncate">
+                          {student.name}
+                        </div>
+                        <div className="text-[10px] text-neutral-500 font-mono">
+                          {student.rollNumber} • {attended}/{total} periods
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="px-2 py-0.5 rounded-full font-bold font-mono text-[11px] bg-[#BA3C2A] text-white">
+                        {pct}%
+                      </span>
+                      <button
+                        onClick={onNavigateToTable}
+                        className="text-[11px] text-neutral-500 hover:text-[#13523B] font-medium"
+                      >
+                        Inspect
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions Card */}
+          <div className="bg-white dark:bg-[#1A221E] rounded-2xl border border-[#E6E3D8] dark:border-[#28332E] p-5 shadow-xs space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="p-1 rounded-lg bg-[#EAF5EF] text-[#13523B]">
+                <BookOpen className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold font-serif text-neutral-900 dark:text-white">
+                Ledger Actions & Navigation
+              </h3>
+            </div>
+
+            <div className="space-y-2 text-xs font-semibold">
+              <button
+                onClick={onNavigateToDayGrid || onNavigateToFastMarking}
+                className="w-full p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#141A17] border border-[#E6E3D8] dark:border-[#28332E] hover:border-[#13523B] flex items-center justify-between text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Grid className="w-4 h-4 text-[#13523B]" />
+                  <span>Daily Attendance Matrix (Day View)</span>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-neutral-400" />
+              </button>
+
+              <button
+                onClick={onNavigateToTable}
+                className="w-full p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#141A17] border border-[#E6E3D8] dark:border-[#28332E] hover:border-[#13523B] flex items-center justify-between text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileSpreadsheet className="w-4 h-4 text-[#13523B]" />
+                  <span>Attendance Ledger & Filter</span>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-neutral-400" />
+              </button>
+
+              <button
+                onClick={onNavigateToRequests}
+                className="w-full p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#141A17] border border-[#E6E3D8] dark:border-[#28332E] hover:border-[#13523B] flex items-center justify-between text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Inbox className="w-4 h-4 text-[#C77724]" />
+                  <span>Review Approvals & Leave Requests</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#C77724] text-white">
+                  {pendingRequests.length}
+                </span>
+              </button>
+            </div>
+          </div>
+
         </div>
 
       </div>

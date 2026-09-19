@@ -245,20 +245,20 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const renderStatusBadge = (status: AttendanceStatus) => {
     if (status === 'present') {
       return (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold font-mono bg-[#EAF5EF] text-[#13523B] dark:bg-[#15271F] dark:text-[#A1D9BC] border border-[#BEE0CE] dark:border-[#1E3B2E]">
           Present
         </span>
       );
     }
     if (status === 'absent') {
       return (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold font-mono bg-[#FDF2F0] text-[#BA3C2A] dark:bg-rose-950/50 dark:text-[#FCA5A5] border border-[#F5C4BD] dark:border-rose-900/60">
           Absent
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold font-mono bg-[#FEF6EE] text-[#C77724] dark:bg-amber-950/50 dark:text-[#FCD34D] border border-[#F9DCBA] dark:border-amber-900/60">
         Leave (OD)
       </span>
     );

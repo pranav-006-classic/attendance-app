@@ -17,10 +17,14 @@ import {
   LogOut,
   ChevronDown,
   Menu,
-  X
+  X,
+  Palette
 } from 'lucide-react';
 import { UserProfile as User } from '../types';
 import { DEMO_TEACHER, DEMO_CRS, DEMO_STUDENTS } from '../demoData';
+import { DesignSystemSpecimenModal } from './DesignSystemSpecimenModal';
+
+const TEACHER_PORTRAIT_URL = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80";
 
 interface AcademicLayoutProps {
   currentUser: User;
@@ -51,6 +55,7 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
 }) => {
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSpecimenOpen, setIsSpecimenOpen] = useState(false);
 
   const navItems = currentUser.role === 'student' ? [
     { id: 'student_home', label: 'My Dashboard', icon: LayoutDashboard },
@@ -160,9 +165,17 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
           {/* User Profile Info Card */}
           <div className="p-2.5 rounded-xl bg-white dark:bg-[#1A221E] border border-[#E6E3D8] dark:border-[#28332E] flex items-center justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-[#13523B] text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
-                {currentUser.name.substring(0, 2).toUpperCase()}
-              </div>
+              {currentUser.role === 'teacher' ? (
+                <img 
+                  src={TEACHER_PORTRAIT_URL} 
+                  alt={currentUser.name}
+                  className="w-8 h-8 rounded-full object-cover border border-[#13523B]/30 shadow-xs shrink-0"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-[#13523B] text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
+                  {currentUser.name.substring(0, 2).toUpperCase()}
+                </div>
+              )}
               <div className="min-w-0">
                 <div className="text-xs font-bold font-serif text-[#0D3828] dark:text-[#E8EFEA] truncate">
                   {currentUser.name}
@@ -198,9 +211,12 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
                   currentUser.role === 'teacher' ? 'bg-[#EAF5EF] text-[#13523B] font-bold' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
                 }`}
               >
-                <div>
-                  <div>Prof. Ananya Sharma</div>
-                  <div className="text-[10px] text-neutral-400">Faculty / Teacher</div>
+                <div className="flex items-center gap-2">
+                  <img src={TEACHER_PORTRAIT_URL} alt="Prof. Ananya" className="w-6 h-6 rounded-full object-cover" />
+                  <div>
+                    <div>Prof. Ananya Sharma</div>
+                    <div className="text-[10px] text-neutral-400">Faculty / Teacher</div>
+                  </div>
                 </div>
                 {currentUser.role === 'teacher' && <span className="text-[#13523B]">✓</span>}
               </button>
@@ -241,8 +257,16 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
             </div>
           )}
 
-          {/* Bottom Utility Bar: Theme, Notifications, Logout */}
+          {/* Bottom Utility Bar: Design Specimen, Theme, Notifications, Logout */}
           <div className="flex items-center justify-between pt-1">
+            <button
+              onClick={() => setIsSpecimenOpen(true)}
+              className="p-2 rounded-lg text-neutral-500 hover:text-[#13523B] dark:text-neutral-400 dark:hover:text-emerald-400 hover:bg-[#E6E3D8]/50 dark:hover:bg-[#28332E] transition-colors cursor-pointer"
+              title="Academic Ledger Design Specimen"
+            >
+              <Palette className="w-4 h-4" />
+            </button>
+
             <button
               onClick={onToggleDarkMode}
               className="p-2 rounded-lg text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white hover:bg-[#E6E3D8]/50 dark:hover:bg-[#28332E] transition-colors cursor-pointer"
@@ -356,6 +380,12 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
           {children}
         </div>
       </main>
+
+      {/* Design System Specimen Modal */}
+      <DesignSystemSpecimenModal 
+        isOpen={isSpecimenOpen} 
+        onClose={() => setIsSpecimenOpen(false)} 
+      />
 
     </div>
   );
