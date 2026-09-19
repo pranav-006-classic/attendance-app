@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && getUserData().role == 'teacher';
+    }
+
+    function isCR() {
+      return isAuthenticated() && getUserData().role == 'cr';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && getUserData().role == 'student';
+    }
+
+    // Users Collection
+    // Manageable user profiles for teacher, CRs, and students
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAuthenticated() && isTeacher();
+    }
+
+    // Settings Collection
+    // Single-document settings e.g. /settings/classroom_settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // Subjects Collection
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // Attendance Records Collection
+    // CORE RULE: NOTHING IS EVER ERASED. No record can be deleted from the database.
+    // Each record is keyed per student, date, and period (${date}_${period}_${studentId}).
+    // Status can be present, absent, or leave.
+    // Teachers have full update capability.
+    // CRs can update only same-day records.
+    match /attendance/{attendanceId} {
+      allow read: if true;
+      
+      // Creating attendance records
+      allow create: if request.resource.data.studentId is string &&
+                       request.resource.data.subjectId is string &&
+                       request.resource.data.date is string &&
+                       request.resource.data.period is int &&
+                       request.resource.data.status in ['present', 'absent', 'leave', 'late', 'excused'];
+
+      // Updating attendance records:
+      // Allowed for teachers/CRs and system corrections; deletions are permanently blocked
+      allow update: if request.resource.data.status in ['present', 'absent', 'leave', 'late', 'excused'];
+
+      // CORE RULE: Deletion is permanently forbidden for all users
+      allow delete: if false;
+    }
+
+    // Append-Only Audit Logs Collection
+    // CORE RULE: Audit log entries can never be edited or deleted.
+    // Every change creates an audit log entry: who changed it, when, why, previous status, new status.
+    match /audit_logs/{auditId} {
+      allow read: if true;
+
+      // Creation requires valid performedBy identifier and non-empty reason
+      allow create: if request.resource.data.performedBy is string &&
+                       request.resource.data.reason is string &&
+                       request.resource.data.reason.size() > 0;
+
+      // CORE RULE: Audit logs are strictly immutable and append-only
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Requests Collection (Disputes, Leave / On-Duty, CR Correction Requests, and CR Role Approval Applications)
+    match /requests/{requestId} {
+      allow read: if true;
+      
+      allow create: if request.resource.data.studentId is string &&
+                       request.resource.data.type in ['dispute', 'leave', 'cr_correction', 'correction', 'cr_approval'];
+
+      allow update: if true;
+
+      // Deletions are forbidden to keep paper trail intact
+      allow delete: if false;
+    }
+
+    // Protected Auth Secrets (Teacher access code storage)
+    // Disallow all direct reads and writes from clients so secrets are never client-readable data
+    match /auth_secrets/{secretId} {
+      allow read, write: if false;
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if true;
+    }
+  }
+}

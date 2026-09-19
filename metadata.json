@@ -1,0 +1,7 @@
+{
+  "name": "AttendEase",
+  "description": "Digital attendance management system with append-only audit logs, role-based workflows, fast marking, and safe-to-skip analytics for college classrooms.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
