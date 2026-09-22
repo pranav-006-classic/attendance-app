@@ -10,6 +10,7 @@ import {
   ShieldCheck, 
   TrendingUp, 
   AlertTriangle, 
+  AlertCircle,
   Calendar as CalendarIcon, 
   CheckCircle2, 
   Clock, 
@@ -163,8 +164,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [disputeNote, setDisputeNote] = useState('');
   const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
 
-  // Success message toast
+  // Success & Error message toasts
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleOpenDispute = (rec: AttendanceRecord) => {
     setDisputeRecord(rec);
@@ -177,6 +179,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
     setIsSubmittingDispute(true);
     try {
+      setErrorMessage(null);
       await submitDispute({
         record: disputeRecord,
         student,
@@ -186,7 +189,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       setDisputeRecord(null);
       onRefreshData();
     } catch (err: any) {
-      alert(err.message || 'Failed to submit dispute');
+      setErrorMessage(err?.message || 'Failed to submit dispute');
     } finally {
       setIsSubmittingDispute(false);
     }
@@ -198,6 +201,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
     setIsSubmittingLeave(true);
     try {
+      setErrorMessage(null);
       await submitLeaveRequest({
         student,
         startDate: leaveStartDate,
@@ -214,7 +218,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       setLeaveScope('full_day');
       onRefreshData();
     } catch (err: any) {
-      alert(err.message || 'Failed to submit leave request');
+      setErrorMessage(err?.message || 'Failed to submit leave request');
     } finally {
       setIsSubmittingLeave(false);
     }
@@ -258,6 +262,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   return (
     <div id="student_dashboard_container" className="space-y-6 max-w-5xl mx-auto pb-16">
+
+      {/* Error Notification */}
+      {errorMessage && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-600 hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toastMessage && (

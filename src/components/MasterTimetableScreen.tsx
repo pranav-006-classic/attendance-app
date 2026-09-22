@@ -131,6 +131,7 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
   const [isSimulatingWeek, setIsSimulatingWeek] = useState(false);
   const [simulationMode, setSimulationMode] = useState<'realistic' | 'all_present'>('realistic');
   const [simulationResult, setSimulationResult] = useState<{ sessions: number; records: number } | null>(null);
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -348,9 +349,8 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
 
   // Reset timetable to default 8 periods
   const handleResetTimetable = () => {
-    if (window.confirm('Reset timetable back to the standard 8-period semester curriculum? Unsaved edits will be replaced.')) {
-      persistSlots(DEMO_TIMETABLE, 'Timetable reset to standard 8-period schedule.');
-    }
+    persistSlots(DEMO_TIMETABLE, 'Timetable reset to standard 8-period schedule.');
+    setIsConfirmingReset(false);
   };
 
   // AI Scanner handlers
@@ -416,7 +416,7 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
   // 1-Week Attendance Simulation & Calculation Handler
   const handleSimulateWeekAttendance = async () => {
     if (!students || students.length === 0) {
-      alert('No students found in classroom roster. Please add students first via Classroom Manager.');
+      showToast('No students found in classroom roster. Please add students first via Classroom Manager.');
       return;
     }
 
@@ -441,7 +441,7 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
         await onRefreshData();
       }
     } catch (err: any) {
-      alert('Failed to generate weekly attendance: ' + err.message);
+      showToast('Failed to generate weekly attendance: ' + (err?.message || 'Unknown error'));
     } finally {
       setIsSimulatingWeek(false);
     }
@@ -830,13 +830,33 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
             <div className="flex items-center justify-between pb-3 text-xs text-neutral-500 dark:text-neutral-400">
               <span className="font-mono">8 Academic Periods per Day • Drag & Drop Enabled</span>
               {canEdit && (
-                <button
-                  onClick={handleResetTimetable}
-                  className="text-[11px] text-neutral-500 hover:text-rose-600 flex items-center gap-1 transition-colors"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Reset to standard curriculum</span>
-                </button>
+                <div>
+                  {isConfirmingReset ? (
+                    <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 px-2 py-1 rounded-md text-[11px]">
+                      <span className="text-rose-700 dark:text-rose-300 font-medium">Reset timetable?</span>
+                      <button
+                        onClick={handleResetTimetable}
+                        className="font-bold text-rose-700 hover:text-rose-900 dark:text-rose-300 dark:hover:text-rose-100 underline cursor-pointer"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setIsConfirmingReset(false)}
+                        className="text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setIsConfirmingReset(true)}
+                      className="text-[11px] text-neutral-500 hover:text-rose-600 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset to standard curriculum</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 

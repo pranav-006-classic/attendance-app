@@ -11,6 +11,7 @@ import {
   BookOpen, 
   Users, 
   CheckCircle2, 
+  AlertCircle,
   ShieldCheck,
   Calendar,
   KeyRound,
@@ -39,12 +40,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [termName, setTermName] = useState(settings.academicTermName || 'Fall Semester 2026');
   const [termStart, setTermStart] = useState(settings.termStartDate || '2026-08-15');
   const [termEnd, setTermEnd] = useState(settings.termEndDate || '2026-12-15');
-  const [periodsCount, setPeriodsCount] = useState(settings.periodsPerDay || 4);
+  const [periodsCount, setPeriodsCount] = useState(settings.periodsPerDay || 8);
   const [classCode, setClassCode] = useState(settings.classCode || 'CS2026-FALL');
   const [allowSignups, setAllowSignups] = useState(settings.allowStudentSignups ?? true);
   const [isCopied, setIsCopied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleCopyCode = () => {
     navigator.clipboard?.writeText(classCode);
@@ -74,12 +76,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     };
 
     try {
+      setErrorMessage(null);
       await saveSettings(updated);
       onSaveSettings(updated);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
     } catch (err: any) {
-      alert('Error saving settings: ' + err.message);
+      setErrorMessage('Error saving settings: ' + (err?.message || 'Unknown error'));
     } finally {
       setIsSaving(false);
     }
@@ -88,6 +91,19 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   return (
     <div id="settings_screen_container" className="max-w-4xl mx-auto space-y-6 pb-20">
       
+      {/* Error message */}
+      {errorMessage && (
+        <div className="p-3.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-600 hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200/80 dark:border-neutral-700/80 p-5 shadow-xs flex items-center justify-between">
         <div>

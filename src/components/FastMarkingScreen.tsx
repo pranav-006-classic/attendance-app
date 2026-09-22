@@ -70,9 +70,9 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     }
   }, [initialMode]);
 
-  // Total periods configured (default 7)
+  // Total periods configured (default 8)
   const totalPeriods = useMemo(() => {
-    return settings.periodsPerDay || 7;
+    return settings.periodsPerDay || 8;
   }, [settings.periodsPerDay]);
 
   const periodsList = useMemo(() => {

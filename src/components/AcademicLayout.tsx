@@ -18,12 +18,10 @@ import {
   ChevronDown,
   Menu,
   X,
-  Palette,
   School
 } from 'lucide-react';
 import { UserProfile as User } from '../types';
 import { DEMO_TEACHER, DEMO_CRS, DEMO_STUDENTS } from '../demoData';
-import { DesignSystemSpecimenModal } from './DesignSystemSpecimenModal';
 
 const TEACHER_PORTRAIT_URL = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80";
 
@@ -56,7 +54,6 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
 }) => {
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSpecimenOpen, setIsSpecimenOpen] = useState(false);
 
   const navItems = currentUser.role === 'student' ? [
     { id: 'student_home', label: 'My Dashboard', icon: LayoutDashboard },
@@ -265,16 +262,8 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
             </div>
           )}
 
-          {/* Bottom Utility Bar: Design Specimen, Theme, Notifications, Logout */}
+          {/* Bottom Utility Bar: Theme, Notifications, Logout */}
           <div className="flex items-center justify-between pt-1">
-            <button
-              onClick={() => setIsSpecimenOpen(true)}
-              className="p-2 rounded-lg text-neutral-500 hover:text-[#13523B] dark:text-neutral-400 dark:hover:text-emerald-400 hover:bg-[#E6E3D8]/50 dark:hover:bg-[#28332E] transition-colors cursor-pointer"
-              title="Academic Ledger Design Specimen"
-            >
-              <Palette className="w-4 h-4" />
-            </button>
-
             <button
               onClick={onToggleDarkMode}
               className="p-2 rounded-lg text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white hover:bg-[#E6E3D8]/50 dark:hover:bg-[#28332E] transition-colors cursor-pointer"
@@ -388,12 +377,6 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
           {children}
         </div>
       </main>
-
-      {/* Design System Specimen Modal */}
-      <DesignSystemSpecimenModal 
-        isOpen={isSpecimenOpen} 
-        onClose={() => setIsSpecimenOpen(false)} 
-      />
 
     </div>
   );

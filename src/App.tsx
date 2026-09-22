@@ -234,17 +234,18 @@ export default function App() {
 
   // Notifications count listener
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.id) return;
+    const currentUserId = currentUser.id;
     const qNotif = query(collection(db, 'notifications'));
     const unsubNotif = onSnapshot(qNotif, (snap) => {
       const myNotifs = snap.docs
         .map(d => d.data())
-        .filter((n: any) => n.recipientId === currentUser.id && !n.read);
+        .filter((n: any) => n.recipientId === currentUserId && !n.read);
       setUnreadNotifCount(myNotifs.length);
     }, (err) => console.warn('Notif count:', err));
 
     return () => unsubNotif();
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   // Handle open history drawer
   const handleOpenHistory = async (record: AttendanceRecord) => {

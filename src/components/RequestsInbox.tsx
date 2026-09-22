@@ -40,6 +40,7 @@ export const RequestsInbox: React.FC<RequestsInboxProps> = ({
   const [reviewComment, setReviewComment] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Filter requests
   const filtered = requests.filter(r => {
@@ -88,9 +89,10 @@ export const RequestsInbox: React.FC<RequestsInboxProps> = ({
       }
 
       setActiveReviewModal(null);
+      setErrorMessage(null);
       onRefreshData();
     } catch (err: any) {
-      alert(err.message || 'Error processing request');
+      setErrorMessage(err.message || 'Error processing request');
     } finally {
       setIsProcessing(false);
     }
@@ -99,7 +101,20 @@ export const RequestsInbox: React.FC<RequestsInboxProps> = ({
   return (
     <div id="requests_inbox_container" className="space-y-4 max-w-4xl mx-auto pb-16">
       
-      {/* Toast */}
+      {/* Error Toast */}
+      {errorMessage && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500" />
+            <span>{errorMessage}</span>
+          </div>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-600 hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Success Toast */}
       {toastMessage && (
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">

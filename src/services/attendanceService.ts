@@ -31,8 +31,7 @@ import {
   DEMO_STUDENTS, 
   DEMO_SUBJECTS, 
   DEFAULT_SETTINGS, 
-  DEMO_TIMETABLE,
-  generateDemoAttendanceData 
+  DEMO_TIMETABLE
 } from '../demoData';
 
 // Collection references
