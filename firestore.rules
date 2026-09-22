@@ -109,5 +109,13 @@ service cloud.firestore {
       allow create, update: if true;
       allow delete: if true;
     }
+
+    // Timetable Collection
+    // Master weekly classroom schedule across 8 periods
+    match /timetable/{timetableId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if true;
+    }
   }
 }

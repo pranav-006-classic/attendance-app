@@ -160,20 +160,28 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Save changes to Firestore
-  const handleSaveTimetable = async () => {
+  // Save changes to Firestore and Local Storage
+  const persistSlots = async (newSlots: TimetableSlot[], toastMsg?: string) => {
+    setSlots(newSlots);
     setIsSaving(true);
     try {
-      await saveTimetable(slots, currentUser.id);
+      await saveTimetable(newSlots, currentUser.id);
       setHasUnsavedChanges(false);
       setSaveSuccess(true);
-      showToast('Timetable successfully saved and synchronized!');
-      setTimeout(() => setSaveSuccess(false), 2500);
+      if (toastMsg) showToast(toastMsg);
+      setTimeout(() => setSaveSuccess(false), 2000);
     } catch (err: any) {
-      alert('Error saving timetable: ' + err.message);
+      console.warn('Timetable cloud sync error:', err);
+      // LocalStorage was still updated inside saveTimetable
+      setHasUnsavedChanges(true);
+      if (toastMsg) showToast(toastMsg + ' (saved locally)');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSaveTimetable = async () => {
+    await persistSlots(slots, 'Timetable saved and synchronized to cloud!');
   };
 
   // Drag and Drop handlers
@@ -232,10 +240,9 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
       const data = JSON.parse(raw);
 
       if (data.kind === 'CLEAR') {
-        // Remove slot
-        setSlots(prev => prev.filter(s => !(s.day === targetDay && s.period === targetPeriod)));
-        setHasUnsavedChanges(true);
-        showToast(`Cleared Period ${targetPeriod} on ${targetDay}`);
+        // Remove slot and auto-persist
+        const updated = slots.filter(s => !(s.day === targetDay && s.period === targetPeriod));
+        persistSlots(updated, `Cleared Period ${targetPeriod} on ${targetDay}`);
         return;
       }
 
@@ -253,12 +260,9 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
           type: targetPeriod >= 6 ? 'Lab' : 'Lecture',
         };
 
-        setSlots(prev => {
-          const filtered = prev.filter(s => !(s.day === targetDay && s.period === targetPeriod));
-          return [...filtered, newSlot];
-        });
-        setHasUnsavedChanges(true);
-        showToast(`Assigned ${newSlot.subjectCode} to ${targetDay} Period ${targetPeriod}`);
+        const filtered = slots.filter(s => !(s.day === targetDay && s.period === targetPeriod));
+        const updated = [...filtered, newSlot];
+        persistSlots(updated, `Assigned ${newSlot.subjectCode} to ${targetDay} Period ${targetPeriod}`);
         return;
       }
 
@@ -266,39 +270,34 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
         const { fromDay, fromPeriod } = data;
         if (fromDay === targetDay && fromPeriod === targetPeriod) return;
 
-        setSlots(prev => {
-          const sourceSlot = prev.find(s => s.day === fromDay && s.period === fromPeriod);
-          const targetSlot = prev.find(s => s.day === targetDay && s.period === targetPeriod);
+        const sourceSlot = slots.find(s => s.day === fromDay && s.period === fromPeriod);
+        const targetSlot = slots.find(s => s.day === targetDay && s.period === targetPeriod);
 
-          const filtered = prev.filter(s => 
-            !(s.day === fromDay && s.period === fromPeriod) &&
-            !(s.day === targetDay && s.period === targetPeriod)
-          );
+        const filtered = slots.filter(s => 
+          !(s.day === fromDay && s.period === fromPeriod) &&
+          !(s.day === targetDay && s.period === targetPeriod)
+        );
 
-          const updated: TimetableSlot[] = [...filtered];
+        const updated: TimetableSlot[] = [...filtered];
 
-          if (sourceSlot) {
-            updated.push({
-              ...sourceSlot,
-              day: targetDay,
-              period: targetPeriod,
-            });
-          }
+        if (sourceSlot) {
+          updated.push({
+            ...sourceSlot,
+            day: targetDay,
+            period: targetPeriod,
+          });
+        }
 
-          if (targetSlot) {
-            // Swap
-            updated.push({
-              ...targetSlot,
-              day: fromDay,
-              period: fromPeriod,
-            });
-          }
+        if (targetSlot) {
+          // Swap
+          updated.push({
+            ...targetSlot,
+            day: fromDay,
+            period: fromPeriod,
+          });
+        }
 
-          return updated;
-        });
-
-        setHasUnsavedChanges(true);
-        showToast(`Moved period to ${targetDay} Period ${targetPeriod}`);
+        persistSlots(updated, `Moved period to ${targetDay} Period ${targetPeriod}`);
       }
     } catch (err) {
       console.warn('Drop error:', err);
@@ -332,31 +331,25 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
       type: editType,
     };
 
-    setSlots(prev => {
-      const filtered = prev.filter(s => !(s.day === day && s.period === period));
-      return [...filtered, newSlot];
-    });
+    const filtered = slots.filter(s => !(s.day === day && s.period === period));
+    const updated = [...filtered, newSlot];
 
-    setHasUnsavedChanges(true);
     setEditModalSlot(null);
-    showToast(`Updated ${day} Period ${period}`);
+    persistSlots(updated, `Updated and saved ${day} Period ${period}`);
   };
 
   const handleClearCurrentSlot = () => {
     if (!editModalSlot) return;
     const { day, period } = editModalSlot;
-    setSlots(prev => prev.filter(s => !(s.day === day && s.period === period)));
-    setHasUnsavedChanges(true);
+    const updated = slots.filter(s => !(s.day === day && s.period === period));
     setEditModalSlot(null);
-    showToast(`Slot cleared for ${day} Period ${period}`);
+    persistSlots(updated, `Slot cleared for ${day} Period ${period}`);
   };
 
   // Reset timetable to default 8 periods
   const handleResetTimetable = () => {
     if (window.confirm('Reset timetable back to the standard 8-period semester curriculum? Unsaved edits will be replaced.')) {
-      setSlots(DEMO_TIMETABLE);
-      setHasUnsavedChanges(true);
-      showToast('Timetable reset to standard 8-period schedule.');
+      persistSlots(DEMO_TIMETABLE, 'Timetable reset to standard 8-period schedule.');
     }
   };
 
@@ -411,18 +404,8 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
   const handleApplyScanResult = async () => {
     if (!scanResult || !scanResult.slots || scanResult.slots.length === 0) return;
 
-    // Apply parsed slots
-    setSlots(scanResult.slots);
-    setHasUnsavedChanges(false);
-
-    // Save directly to Firestore
-    try {
-      await saveTimetable(scanResult.slots, currentUser.id);
-      showToast(`Applied ${scanResult.slots.length} AI-parsed class slots across 8 periods!`);
-    } catch (err) {
-      console.warn('Auto-save error:', err);
-      setHasUnsavedChanges(true);
-    }
+    // Apply parsed slots and auto-persist to Firestore & local storage
+    await persistSlots(scanResult.slots, `Applied and saved ${scanResult.slots.length} AI-parsed class slots across 8 periods!`);
 
     setIsAIScannerOpen(false);
     setScanResult(null);
@@ -600,9 +583,24 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
               <span className="px-2 py-0.5 text-[10px] font-bold font-mono uppercase bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800">
                 8 Periods / Day
               </span>
-              {hasUnsavedChanges && (
-                <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 rounded border border-rose-200 dark:border-rose-800 animate-pulse">
-                  Unsaved Timetable Edits
+              {isSaving ? (
+                <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                  Saving...
+                </span>
+              ) : saveSuccess ? (
+                <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  Saved
+                </span>
+              ) : hasUnsavedChanges ? (
+                <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800">
+                  Unsynced Edits
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 text-[10px] font-medium font-mono text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/80 rounded border border-neutral-200 dark:border-neutral-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  Synced
                 </span>
               )}
             </div>
@@ -610,7 +608,7 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
               Master Timetable & Curriculum Matrix
             </h1>
             <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-1 max-w-2xl font-light">
-              Drag-and-drop subject scheduling across 8 daily periods, AI image parsing, and weekly attendance calculation.
+              Drag-and-drop subject scheduling across 8 daily periods, auto-saved to cloud & local storage with AI scanning.
             </p>
           </div>
 
@@ -643,15 +641,20 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
             </button>
 
             {/* Save Timetable Button */}
-            {canEdit && hasUnsavedChanges && (
+            {canEdit && (
               <button
                 id="btn_save_timetable"
                 onClick={handleSaveTimetable}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all animate-bounce"
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer ${
+                  hasUnsavedChanges
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white animate-pulse'
+                    : 'bg-white dark:bg-[#1C2420] text-neutral-700 dark:text-neutral-200 border border-[#E6E3D8] dark:border-[#28332E] hover:bg-[#F2EFE8]'
+                }`}
+                title="Save current timetable to cloud database"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving...' : 'Save Matrix'}</span>
+                <Save className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{isSaving ? 'Syncing...' : hasUnsavedChanges ? 'Save Changes' : 'Synced'}</span>
               </button>
             )}
 

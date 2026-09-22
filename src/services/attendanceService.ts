@@ -185,8 +185,10 @@ export async function saveSettings(settings: ClassroomSettings): Promise<void> {
   await setDoc(doc(db, SETTINGS_COL, settings.id), settings);
 }
 
+const TIMETABLE_LOCAL_KEY = 'attendeease_timetable_active';
+
 /**
- * Fetch Master Timetable schedule from Firestore
+ * Fetch Master Timetable schedule from Firestore with instant local cache fallback
  */
 export async function fetchTimetable(): Promise<TimetableSlot[]> {
   try {
@@ -195,19 +197,42 @@ export async function fetchTimetable(): Promise<TimetableSlot[]> {
     if (snap.exists()) {
       const data = snap.data();
       if (Array.isArray(data.slots) && data.slots.length > 0) {
+        try {
+          localStorage.setItem(TIMETABLE_LOCAL_KEY, JSON.stringify(data.slots));
+        } catch (_) {}
         return data.slots as TimetableSlot[];
       }
     }
   } catch (err) {
-    console.warn('Notice: Firestore timetable lookup failed, using default:', err);
+    console.warn('Notice: Firestore timetable lookup failed, checking local backup:', err);
   }
+
+  // Check local storage backup if Firestore has no record yet or is connecting
+  try {
+    const local = localStorage.getItem(TIMETABLE_LOCAL_KEY);
+    if (local) {
+      const parsed = JSON.parse(local);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed as TimetableSlot[];
+      }
+    }
+  } catch (_) {}
+
   return DEMO_TIMETABLE;
 }
 
 /**
- * Save updated Master Timetable slots to Firestore
+ * Save updated Master Timetable slots to Firestore and local cache simultaneously
  */
 export async function saveTimetable(slots: TimetableSlot[], userId?: string): Promise<void> {
+  // 1. Immediately cache to localStorage so UI never loses changes across tabs/refreshes
+  try {
+    localStorage.setItem(TIMETABLE_LOCAL_KEY, JSON.stringify(slots));
+  } catch (storageErr) {
+    console.warn('LocalStorage save error:', storageErr);
+  }
+
+  // 2. Persist to Firestore cloud database
   const docRef = doc(db, TIMETABLE_COL, 'active_schedule');
   await setDoc(docRef, {
     id: 'active_schedule',
