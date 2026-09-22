@@ -18,7 +18,8 @@ import {
   ChevronDown,
   Menu,
   X,
-  Palette
+  Palette,
+  School
 } from 'lucide-react';
 import { UserProfile as User } from '../types';
 import { DEMO_TEACHER, DEMO_CRS, DEMO_STUDENTS } from '../demoData';
@@ -71,6 +72,13 @@ export const AcademicLayout: React.FC<AcademicLayoutProps> = ({
     { id: 'timetable', label: 'Master Timetable', icon: Calendar },
     { id: 'leave_application', label: 'Leave & OD Portal', icon: FileText },
     { id: 'requests', label: 'Requests & Approvals', icon: Inbox, badge: pendingRequestsCount },
+    ...(currentUser.role === 'teacher' || currentUser.role === 'cr' || currentUser.isCR ? [
+      { 
+        id: 'classroom_manager', 
+        label: currentUser.role === 'teacher' ? 'Class & AI Roster' : 'Subjects & Courses', 
+        icon: School 
+      },
+    ] : []),
     ...(currentUser.role === 'teacher' ? [
       { id: 'settings', label: 'Settings & Rules', icon: SettingsIcon },
     ] : []),

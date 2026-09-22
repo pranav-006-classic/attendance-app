@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   X,
   ChevronRight,
-  Eye
+  Eye,
+  Undo2
 } from 'lucide-react';
 import { 
   AttendanceRecord, 
@@ -33,6 +34,7 @@ interface AttendanceTableProps {
   onOpenHistory: (record: AttendanceRecord) => void;
   onOpenEdit: (record: AttendanceRecord) => void;
   onRaiseDispute?: (record: AttendanceRecord) => void;
+  onOpenCRReversal?: (record?: AttendanceRecord) => void;
 }
 
 export const AttendanceTable: React.FC<AttendanceTableProps> = ({
@@ -44,6 +46,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   onOpenHistory,
   onOpenEdit,
   onRaiseDispute,
+  onOpenCRReversal,
 }) => {
   // Tabs: "Records" | "Summary" | "Requests" (Requests handled on parent or sub-tab)
   const [activeTab, setActiveTab] = useState<'records' | 'summary'>('records');
@@ -350,6 +353,20 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
               <FileText className="w-3.5 h-3.5 mr-1.5 text-indigo-600 dark:text-indigo-400" />
               Print / PDF
             </button>
+
+            {/* CR Attendance Reversal Request Action */}
+            {(currentUser.role === 'cr' || currentUser.isCR) && onOpenCRReversal && (
+              <button
+                id="btn_request_cr_reversal_top"
+                type="button"
+                onClick={() => onOpenCRReversal()}
+                className="inline-flex items-center px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                title="Submit attendance correction/reversal request for teacher approval"
+              >
+                <Undo2 className="w-3.5 h-3.5 mr-1.5" />
+                Request Reversal
+              </button>
+            )}
           </div>
         </div>
 
@@ -680,14 +697,27 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                               <History className="w-4 h-4" />
                             </button>
 
-                            {/* Edit Button for Teacher / CR */}
-                            {canEdit && (
+                            {/* CR Reversal Request Button */}
+                            {(currentUser.role === 'cr' || currentUser.isCR) && onOpenCRReversal && (
+                              <button
+                                id={`btn_cr_reversal_${record.id}`}
+                                type="button"
+                                onClick={() => onOpenCRReversal(record)}
+                                className="p-1.5 rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
+                                title="Request attendance reversal to teacher"
+                              >
+                                <Undo2 className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Edit Button for Teacher */}
+                            {currentUser.role === 'teacher' && (
                               <button
                                 id={`btn_edit_${record.id}`}
                                 type="button"
                                 onClick={() => onOpenEdit(record)}
                                 className="p-1.5 rounded-lg text-neutral-500 hover:text-emerald-600 dark:text-neutral-400 dark:hover:text-emerald-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
-                                title="Edit record"
+                                title="Edit / reverse attendance status"
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>

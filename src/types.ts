@@ -112,6 +112,7 @@ export interface AttendanceRequest {
   date?: string; // Single date or start date
   endDate?: string; // For multi-day leave
   period?: number;
+  currentStatus?: AttendanceStatus; // e.g. 'absent' when requesting reversal to 'present'
   requestedStatus?: AttendanceStatus; // e.g. 'present' for dispute, 'leave' for leave
   reason: string;
   attachmentUrl?: string;

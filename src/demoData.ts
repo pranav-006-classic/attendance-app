@@ -146,6 +146,7 @@ export const DEMO_TIMETABLE: TimetableSlot[] = [
   { day: 'Monday', period: 5, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Algorithm Design', facultyName: 'Dr. Meenakshi S', room: 'Room 105', type: 'Lecture' },
   { day: 'Monday', period: 6, subjectId: 'sub_cs404', subjectCode: 'CS404', subjectName: 'OS Kernel Lab', facultyName: 'Dr. V. Sharma', room: 'Lab 4', type: 'Lab' },
   { day: 'Monday', period: 7, subjectId: 'sub_cs404', subjectCode: 'CS404', subjectName: 'OS Kernel Lab', facultyName: 'Dr. V. Sharma', room: 'Lab 4', type: 'Lab' },
+  { day: 'Monday', period: 8, subjectId: 'sub_cs401', subjectCode: 'CS401', subjectName: 'Distributed Systems Tutorial', facultyName: 'Prof. Ananya Sharma', room: 'LH-302', type: 'Tutorial' },
 
   // Tuesday
   { day: 'Tuesday', period: 1, subjectId: 'sub_cs401', subjectCode: 'CS401', subjectName: 'Distributed Systems', facultyName: 'Prof. Ananya Sharma', room: 'LH-302', type: 'Lecture' },
@@ -155,6 +156,7 @@ export const DEMO_TIMETABLE: TimetableSlot[] = [
   { day: 'Tuesday', period: 5, subjectId: 'sub_cs403', subjectCode: 'CS403', subjectName: 'Networks Lab', facultyName: 'Prof. Vikram Malhotra', room: 'Lab 2', type: 'Lab' },
   { day: 'Tuesday', period: 6, subjectId: 'sub_cs403', subjectCode: 'CS403', subjectName: 'Networks Lab', facultyName: 'Prof. Vikram Malhotra', room: 'Lab 2', type: 'Lab' },
   { day: 'Tuesday', period: 7, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Algorithms Tutorial', facultyName: 'Dr. Meenakshi S', room: 'Room 105', type: 'Tutorial' },
+  { day: 'Tuesday', period: 8, subjectId: 'sub_cs402', subjectCode: 'CS402', subjectName: 'Database Engineering Clinic', facultyName: 'Dr. Rajesh K', room: 'Room 204', type: 'Tutorial' },
 
   // Wednesday
   { day: 'Wednesday', period: 1, subjectId: 'sub_cs403', subjectCode: 'CS403', subjectName: 'Computer Networks', facultyName: 'Prof. Vikram Malhotra', room: 'LH-301', type: 'Lecture' },
@@ -164,6 +166,7 @@ export const DEMO_TIMETABLE: TimetableSlot[] = [
   { day: 'Wednesday', period: 5, subjectId: 'sub_cs402', subjectCode: 'CS402', subjectName: 'Database Lab', facultyName: 'Dr. Rajesh K', room: 'Lab 3', type: 'Lab' },
   { day: 'Wednesday', period: 6, subjectId: 'sub_cs402', subjectCode: 'CS402', subjectName: 'Database Lab', facultyName: 'Dr. Rajesh K', room: 'Lab 3', type: 'Lab' },
   { day: 'Wednesday', period: 7, subjectId: 'sub_cs401', subjectCode: 'CS401', subjectName: 'DS Seminar', facultyName: 'Prof. Ananya Sharma', room: 'LH-302', type: 'Tutorial' },
+  { day: 'Wednesday', period: 8, subjectId: 'sub_cs403', subjectCode: 'CS403', subjectName: 'Network Security Lab', facultyName: 'Prof. Vikram Malhotra', room: 'Lab 2', type: 'Lab' },
 
   // Thursday
   { day: 'Thursday', period: 1, subjectId: 'sub_cs402', subjectCode: 'CS402', subjectName: 'Database Engineering', facultyName: 'Dr. Rajesh K', room: 'Room 204', type: 'Lecture' },
@@ -173,6 +176,7 @@ export const DEMO_TIMETABLE: TimetableSlot[] = [
   { day: 'Thursday', period: 5, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Algorithm Design', facultyName: 'Dr. Meenakshi S', room: 'Room 105', type: 'Lecture' },
   { day: 'Thursday', period: 6, subjectId: 'sub_cs404', subjectCode: 'CS404', subjectName: 'Systems Colloquium', facultyName: 'Dr. V. Sharma', room: 'Seminar Hall A', type: 'Tutorial' },
   { day: 'Thursday', period: 7, subjectId: 'sub_cs402', subjectCode: 'CS402', subjectName: 'DB Optimization', facultyName: 'Dr. Rajesh K', room: 'Room 204', type: 'Tutorial' },
+  { day: 'Thursday', period: 8, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Problem Solving Lab', facultyName: 'Dr. Meenakshi S', room: 'Room 105', type: 'Tutorial' },
 
   // Friday
   { day: 'Friday', period: 1, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Algorithm Design', facultyName: 'Dr. Meenakshi S', room: 'Room 105', type: 'Lecture' },
@@ -182,6 +186,7 @@ export const DEMO_TIMETABLE: TimetableSlot[] = [
   { day: 'Friday', period: 5, subjectId: 'sub_cs401', subjectCode: 'CS401', subjectName: 'Distributed Systems', facultyName: 'Prof. Ananya Sharma', room: 'LH-302', type: 'Lecture' },
   { day: 'Friday', period: 6, subjectId: 'sub_cs403', subjectCode: 'CS403', subjectName: 'Networks Security Workshop', facultyName: 'Prof. Vikram Malhotra', room: 'Lab 2', type: 'Lab' },
   { day: 'Friday', period: 7, subjectId: 'sub_cs405', subjectCode: 'CS405', subjectName: 'Competitive Coding', facultyName: 'Dr. Meenakshi S', room: 'Lab 1', type: 'Lab' },
+  { day: 'Friday', period: 8, subjectId: 'sub_cs404', subjectCode: 'CS404', subjectName: 'OS Architecture Seminar', facultyName: 'Dr. V. Sharma', room: 'LH-302', type: 'Tutorial' },
 ];
 
 export const DEFAULT_SETTINGS: ClassroomSettings = {
@@ -190,7 +195,7 @@ export const DEFAULT_SETTINGS: ClassroomSettings = {
   academicTermName: 'Fall Semester 2026',
   termStartDate: '2026-08-15',
   termEndDate: '2026-12-15',
-  periodsPerDay: 7,
+  periodsPerDay: 8,
   dailyPeriodTimings: [
     { period: 1, time: '09:00 AM - 09:50 AM' },
     { period: 2, time: '09:55 AM - 10:45 AM' },
@@ -199,6 +204,7 @@ export const DEFAULT_SETTINGS: ClassroomSettings = {
     { period: 5, time: '01:30 PM - 02:20 PM' },
     { period: 6, time: '02:25 PM - 03:15 PM' },
     { period: 7, time: '03:20 PM - 04:10 PM' },
+    { period: 8, time: '04:15 PM - 05:05 PM' },
   ],
   classroomName: 'LH-302, Dept. of Computer Science',
   department: 'Computer Science & Engineering',

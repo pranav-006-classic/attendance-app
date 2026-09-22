@@ -39,6 +39,8 @@ import { NotificationsDrawer } from './components/NotificationsDrawer';
 import { MasterTimetableScreen } from './components/MasterTimetableScreen';
 import { LeaveApplicationScreen } from './components/LeaveApplicationScreen';
 import { AcademicLayout } from './components/AcademicLayout';
+import { ClassroomManagerScreen } from './components/ClassroomManagerScreen';
+import { CRReversalModal } from './components/CRReversalModal';
 
 export default function App() {
   // Theme state
@@ -86,9 +88,9 @@ export default function App() {
     return DEMO_TEACHER; // Start with teacher active for immediate reviewer testing
   });
 
-  // Application Data States
-  const [users, setUsers] = useState<UserProfile[]>([DEMO_TEACHER, ...DEMO_STUDENTS]);
-  const [subjects, setSubjects] = useState<Subject[]>(DEMO_SUBJECTS);
+  // Application Data States - Starts with faculty administrator and 0 students / 0 subjects
+  const [users, setUsers] = useState<UserProfile[]>([DEMO_TEACHER]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [settings, setSettings] = useState<ClassroomSettings>(DEFAULT_SETTINGS);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [requests, setRequests] = useState<AttendanceRequest[]>([]);
@@ -123,10 +125,35 @@ export default function App() {
   const [editTargetRecord, setEditTargetRecord] = useState<AttendanceRecord | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // CR Reversal Modal State
+  const [isCRReversalOpen, setIsCRReversalOpen] = useState(false);
+  const [crReversalRecord, setCrReversalRecord] = useState<AttendanceRecord | null>(null);
+
+  const handleOpenCRReversal = (record?: AttendanceRecord) => {
+    setCrReversalRecord(record || null);
+    setIsCRReversalOpen(true);
+  };
+
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
 
   // Seeding state
   const [isSeeding, setIsSeeding] = useState(false);
+
+  // Manual refresh helper
+  const handleRefreshData = async () => {
+    try {
+      const [loadedUsers, loadedSubjects, loadedSettings] = await Promise.all([
+        fetchUsers(),
+        fetchSubjects(),
+        fetchSettings(),
+      ]);
+      setUsers(loadedUsers.length ? loadedUsers : [DEMO_TEACHER]);
+      setSubjects(loadedSubjects);
+      if (loadedSettings) setSettings(loadedSettings);
+    } catch (err) {
+      console.warn('Data refresh error:', err);
+    }
+  };
 
   // Save current user to localStorage
   const handleSetCurrentUser = (user: UserProfile | null) => {
@@ -155,8 +182,8 @@ export default function App() {
           fetchSubjects(),
           fetchSettings(),
         ]);
-        if (loadedUsers.length) setUsers(loadedUsers);
-        if (loadedSubjects.length) setSubjects(loadedSubjects);
+        setUsers(loadedUsers.length ? loadedUsers : [DEMO_TEACHER]);
+        setSubjects(loadedSubjects);
         if (loadedSettings) setSettings(loadedSettings);
       } catch (err) {
         console.warn('Init error:', err);
@@ -183,9 +210,25 @@ export default function App() {
       setRequests(list);
     }, (err) => console.warn('Requests sync:', err));
 
+    // 3. Users listener
+    const qUsers = query(collection(db, 'users'));
+    const unsubUsers = onSnapshot(qUsers, (snap) => {
+      const uList = snap.docs.map(d => ({ ...d.data(), id: d.id }) as UserProfile);
+      setUsers(uList.length ? uList : [DEMO_TEACHER]);
+    }, (err) => console.warn('Users sync:', err));
+
+    // 4. Subjects listener
+    const qSubjects = query(collection(db, 'subjects'));
+    const unsubSubjects = onSnapshot(qSubjects, (snap) => {
+      const sList = snap.docs.map(d => ({ ...d.data(), id: d.id }) as Subject);
+      setSubjects(sList);
+    }, (err) => console.warn('Subjects sync:', err));
+
     return () => {
       unsubAtt();
       unsubReq();
+      unsubUsers();
+      unsubSubjects();
     };
   }, []);
 
@@ -247,6 +290,8 @@ export default function App() {
 
   // Students list (excluding teacher)
   const studentsList = users.filter(u => u.role === 'student' || u.role === 'cr');
+  const validStudentIds = new Set(studentsList.map(s => s.id));
+  const activeAttendanceRecords = attendanceRecords.filter(r => validStudentIds.has(r.studentId));
 
   return (
     <AcademicLayout
@@ -264,7 +309,7 @@ export default function App() {
       {activeScreen === 'dashboard' && (
         <TeacherDashboard
           currentUser={currentUser}
-          records={attendanceRecords}
+          records={activeAttendanceRecords}
           subjects={subjects}
           students={studentsList}
           requests={requests}
@@ -274,6 +319,8 @@ export default function App() {
           onNavigateToRequests={() => setActiveScreen('requests')}
           onOpenHistory={handleOpenHistory}
           onNavigateToDayGrid={() => setActiveScreen('day_view_grid')}
+          onNavigateToClassroomManager={() => setActiveScreen('classroom_manager')}
+          onOpenCRReversal={() => handleOpenCRReversal()}
         />
       )}
 
@@ -283,7 +330,7 @@ export default function App() {
           subjects={subjects}
           students={studentsList}
           settings={settings}
-          records={attendanceRecords}
+          records={activeAttendanceRecords}
           initialMode="day_grid"
           onSaved={() => setActiveScreen('table')}
           onNavigateToTable={() => setActiveScreen('table')}
@@ -296,7 +343,7 @@ export default function App() {
           subjects={subjects}
           students={studentsList}
           settings={settings}
-          records={attendanceRecords}
+          records={activeAttendanceRecords}
           initialMode="single"
           initialSubjectId={markingPreload.subjectId}
           initialPeriod={markingPreload.period}
@@ -307,7 +354,7 @@ export default function App() {
 
       {activeScreen === 'table' && (
         <AttendanceTable
-          records={attendanceRecords}
+          records={activeAttendanceRecords}
           subjects={subjects}
           students={studentsList}
           currentUser={currentUser}
@@ -320,6 +367,18 @@ export default function App() {
           onRaiseDispute={async () => {
             setActiveScreen('student_home');
           }}
+          onOpenCRReversal={handleOpenCRReversal}
+        />
+      )}
+
+      {activeScreen === 'classroom_manager' && (
+        <ClassroomManagerScreen
+          currentUser={currentUser}
+          students={studentsList}
+          subjects={subjects}
+          settings={settings}
+          onRefreshData={handleRefreshData}
+          onNavigateToMarking={() => setActiveScreen('fast_marking')}
         />
       )}
 
@@ -327,8 +386,10 @@ export default function App() {
         <MasterTimetableScreen
           currentUser={currentUser}
           subjects={subjects}
-          attendanceRecords={attendanceRecords}
+          students={studentsList}
+          attendanceRecords={activeAttendanceRecords}
           settings={settings}
+          onRefreshData={handleRefreshData}
           onNavigateToMarking={(subId, period) => {
             handleNavigateToMarking(subId, period, 'single');
           }}
@@ -341,7 +402,7 @@ export default function App() {
           currentUser={currentUser}
           requests={requests}
           subjects={subjects}
-          attendanceRecords={attendanceRecords}
+          attendanceRecords={activeAttendanceRecords}
           settings={settings}
           onNavigateToInbox={() => setActiveScreen('requests')}
         />
@@ -350,7 +411,7 @@ export default function App() {
       {activeScreen === 'student_home' && (
         <StudentDashboard
           student={currentUser}
-          records={attendanceRecords}
+          records={activeAttendanceRecords}
           subjects={subjects}
           settings={settings}
           requests={requests.filter(r => r.studentId === currentUser.id)}
@@ -408,6 +469,22 @@ export default function App() {
         isOpen={isNotifDrawerOpen}
         onClose={() => setIsNotifDrawerOpen(false)}
         onNavigateToRequests={() => setActiveScreen('requests')}
+      />
+
+      {/* CR Reversal Request Modal */}
+      <CRReversalModal
+        isOpen={isCRReversalOpen}
+        onClose={() => {
+          setIsCRReversalOpen(false);
+          setCrReversalRecord(null);
+        }}
+        currentUser={currentUser}
+        students={studentsList}
+        subjects={subjects}
+        initialRecord={crReversalRecord}
+        onSubmitted={() => {
+          handleRefreshData();
+        }}
       />
     </AcademicLayout>
   );

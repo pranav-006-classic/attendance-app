@@ -109,6 +109,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   // Subject-wise breakdown
   const subjectStats = useMemo(() => {
+    const minRequired = settings.minimumAttendancePercentage || 75;
+    const pMin = minRequired / 100;
+
     return subjects.map(sub => {
       const subRecords = studentRecords.filter(r => r.subjectId === sub.id);
       const total = subRecords.length;
@@ -117,15 +120,33 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         if (r.status === 'present' || r.status === 'leave') attended++;
       });
       const pct = total > 0 ? Math.round((attended / total) * 1000) / 10 : 100;
+      
+      let safeToSkip = 0;
+      let consecutiveNeeded = 0;
+
+      if (total > 0) {
+        if (pct >= minRequired) {
+          safeToSkip = Math.max(0, Math.floor((attended / pMin) - total));
+        } else {
+          consecutiveNeeded = Math.ceil((pMin * total - attended) / (1 - pMin));
+        }
+      }
+
       return {
         subject: sub,
         total,
         attended,
         percentage: pct,
-        isBelow: pct < (settings.minimumAttendancePercentage || 75),
+        safeToSkip,
+        consecutiveNeeded,
+        isBelow: pct < minRequired,
       };
     });
   }, [subjects, studentRecords, settings]);
+
+  // Safe-to-skip simulator state
+  const [simulatedSkips, setSimulatedSkips] = useState<number>(0);
+  const [simulatedAttends, setSimulatedAttends] = useState<number>(0);
 
   // Leave / On-Duty form state
   const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -404,12 +425,136 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   style={{ width: `${Math.min(100, item.percentage)}%` }}
                 />
               </div>
+              
               <div className="mt-2 text-[11px] text-neutral-400 flex justify-between">
                 <span>{item.attended} attended</span>
                 <span>{item.total} total</span>
               </div>
+
+              {/* Course Safe to Skip or Needed Badge */}
+              {item.total > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-neutral-200/60 dark:border-neutral-700/60 flex items-center justify-between text-[11px]">
+                  {item.isBelow ? (
+                    <span className="text-rose-600 dark:text-rose-400 font-bold">
+                      Need {item.consecutiveNeeded} {item.consecutiveNeeded === 1 ? 'class' : 'classes'} for 75%
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                      Can skip {item.safeToSkip} {item.safeToSkip === 1 ? 'class' : 'classes'} safely
+                    </span>
+                  )}
+                  <span className="text-neutral-400 font-mono text-[10px]">
+                    {item.subject.teacherName?.split(' ').pop()}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
+        </div>
+
+        {/* Interactive Safe-to-Skip Simulator */}
+        <div className="mt-5 p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200/80 dark:border-neutral-700/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div>
+              <h4 className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 font-['Plus_Jakarta_Sans']">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Safe-to-Skip & Attendance Target Simulator</span>
+              </h4>
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                Simulate upcoming classes to see how absences or attendance will impact your overall percentage.
+              </p>
+            </div>
+
+            {/* Quick Reset */}
+            {(simulatedSkips > 0 || simulatedAttends > 0) && (
+              <button
+                type="button"
+                onClick={() => { setSimulatedSkips(0); setSimulatedAttends(0); }}
+                className="text-[11px] text-neutral-500 hover:text-neutral-900 dark:hover:text-white underline"
+              >
+                Reset Simulation
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+            {/* Control 1: Miss upcoming classes */}
+            <div className="p-3 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200/80 dark:border-neutral-700">
+              <span className="text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 block mb-1.5">
+                If I miss upcoming classes:
+              </span>
+              <div className="flex items-center gap-2">
+                {[0, 1, 2, 3, 5].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setSimulatedSkips(count)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                      simulatedSkips === count
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200'
+                    }`}
+                  >
+                    +{count}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Control 2: Attend upcoming classes */}
+            <div className="p-3 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200/80 dark:border-neutral-700">
+              <span className="text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 block mb-1.5">
+                If I attend next classes:
+              </span>
+              <div className="flex items-center gap-2">
+                {[0, 1, 2, 3, 5].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setSimulatedAttends(count)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                      simulatedAttends === count
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200'
+                    }`}
+                  >
+                    +{count}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Projected Result */}
+            {(() => {
+              const projTotal = stats.total + simulatedSkips + simulatedAttends;
+              const projAttended = stats.attended + simulatedAttends;
+              const projPct = projTotal > 0 ? Math.round((projAttended / projTotal) * 1000) / 10 : 100;
+              const minReq = settings.minimumAttendancePercentage || 75;
+              const isSafe = projPct >= minReq;
+
+              return (
+                <div className={`p-3 rounded-xl border text-center ${
+                  isSafe
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                    : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800'
+                }`}>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 dark:text-neutral-400 block">
+                    Projected Attendance
+                  </span>
+                  <div className={`text-xl font-black font-['Newsreader'] mt-0.5 ${
+                    isSafe ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'
+                  }`}>
+                    {projPct}%
+                  </div>
+                  <span className={`text-[10px] font-bold ${
+                    isSafe ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {isSafe ? '✅ Safe (Above 75%)' : '⚠️ Shortage Warning (<75%)'}
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
         </div>
       </div>
 

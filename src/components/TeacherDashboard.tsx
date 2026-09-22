@@ -21,7 +21,8 @@ import {
   FileSpreadsheet,
   Inbox,
   ShieldCheck,
-  Check
+  Check,
+  Undo2
 } from 'lucide-react';
 
 const TEACHER_PORTRAIT_URL = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80";
@@ -38,6 +39,8 @@ interface TeacherDashboardProps {
   onNavigateToRequests: () => void;
   onOpenHistory: (record: AttendanceRecord) => void;
   onNavigateToDayGrid?: () => void;
+  onNavigateToClassroomManager?: () => void;
+  onOpenCRReversal?: () => void;
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -52,6 +55,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onNavigateToRequests,
   onOpenHistory,
   onNavigateToDayGrid,
+  onNavigateToClassroomManager,
+  onOpenCRReversal,
 }) => {
   // Pending requests count
   const pendingRequests = useMemo(() => {
@@ -174,6 +179,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            {onNavigateToClassroomManager && (
+              <button
+                id="btn_hero_classroom_manager"
+                type="button"
+                onClick={onNavigateToClassroomManager}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white/15 text-white hover:bg-white/25 border border-white/25 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Class roster, student list import, and curriculum setup"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>{currentUser.role === 'teacher' ? 'Class & AI Roster' : 'Manage Subjects'}</span>
+              </button>
+            )}
+
+            {(currentUser.role === 'cr' || currentUser.isCR) && onOpenCRReversal && (
+              <button
+                id="btn_hero_cr_reversal"
+                type="button"
+                onClick={onOpenCRReversal}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                title="Request an attendance reversal from the instructor"
+              >
+                <Undo2 className="w-4 h-4" />
+                <span>Request Reversal</span>
+              </button>
+            )}
+
             <button
               id="btn_hero_fast_marking"
               type="button"

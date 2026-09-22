@@ -5,6 +5,7 @@ import {
   getDoc, 
   setDoc, 
   updateDoc, 
+  deleteDoc,
   query, 
   where, 
   orderBy, 
@@ -21,7 +22,8 @@ import {
   ClassroomSettings,
   AppNotification,
   AttendanceStatus,
-  UserRole
+  UserRole,
+  TimetableSlot
 } from '../types';
 import { 
   DEMO_TEACHER, 
@@ -29,6 +31,7 @@ import {
   DEMO_STUDENTS, 
   DEMO_SUBJECTS, 
   DEFAULT_SETTINGS, 
+  DEMO_TIMETABLE,
   generateDemoAttendanceData 
 } from '../demoData';
 
@@ -40,6 +43,7 @@ const AUDIT_LOGS_COL = 'audit_logs';
 const REQUESTS_COL = 'requests';
 const SETTINGS_COL = 'settings';
 const NOTIFICATIONS_COL = 'notifications';
+const TIMETABLE_COL = 'timetable';
 
 /**
  * Seed Firestore with initial demo data if collections are uninitialized
@@ -49,121 +53,84 @@ export async function seedDatabaseIfEmpty(
   force: boolean = false
 ): Promise<boolean> {
   try {
-    const [subjectsSnap, attendanceSnap] = await Promise.all([
-      getDocs(collection(db, SUBJECTS_COL)),
-      getDocs(collection(db, ATTENDANCE_COL)),
+    const [usersSnap, settingsSnap] = await Promise.all([
+      getDocs(collection(db, USERS_COL)),
+      getDocs(collection(db, SETTINGS_COL)),
     ]);
 
-    if (!force && !subjectsSnap.empty && !attendanceSnap.empty) {
-      return false; // already fully seeded
-    }
-
-    if (subjectsSnap.empty || force) {
-      if (onProgress) onProgress('Seeding subjects and classroom configurations...');
-      // Seed subjects
-      for (const sub of DEMO_SUBJECTS) {
-        await setDoc(doc(db, SUBJECTS_COL, sub.id), sub);
-      }
-
-      // Seed settings
-      await setDoc(doc(db, SETTINGS_COL, DEFAULT_SETTINGS.id), DEFAULT_SETTINGS);
-
-      // Seed Users
-      if (onProgress) onProgress('Seeding faculty, CRs, and 25 student profiles...');
+    // Ensure faculty administrator profile exists
+    if (usersSnap.empty || force) {
+      if (onProgress) onProgress('Ensuring faculty administrator profile is ready...');
       await setDoc(doc(db, USERS_COL, DEMO_TEACHER.id), DEMO_TEACHER);
-      for (const cr of DEMO_CRS) {
-        await setDoc(doc(db, USERS_COL, cr.id), cr);
-      }
-      for (const st of DEMO_STUDENTS) {
-        await setDoc(doc(db, USERS_COL, st.id), st);
-      }
     }
 
-    if (attendanceSnap.empty || force) {
-      // Generate 4 weeks of attendance and audit logs
-      if (onProgress) onProgress('Generating 4 weeks of attendance records & audit logs...');
-      const { records, auditLogs, requests } = generateDemoAttendanceData();
-
-      // Batch write records in chunks (Firestore limit is 500 per batch)
-      const chunkSize = 200;
-      for (let i = 0; i < records.length; i += chunkSize) {
-        const batch = writeBatch(db);
-        const chunk = records.slice(i, i + chunkSize);
-        chunk.forEach((rec: AttendanceRecord) => {
-          batch.set(doc(db, ATTENDANCE_COL, rec.id), rec);
-        });
-        await batch.commit();
-        if (onProgress) onProgress(`Saved attendance batch ${Math.min(i + chunkSize, records.length)} / ${records.length}`);
-      }
-
-      // Check if audit logs already exist to avoid duplicate write on immutable audit logs
-      const auditCheck = await getDocs(collection(db, AUDIT_LOGS_COL));
-      if (auditCheck.empty) {
-        for (let i = 0; i < auditLogs.length; i += chunkSize) {
-          const batch = writeBatch(db);
-          const chunk = auditLogs.slice(i, i + chunkSize);
-          chunk.forEach((log: AuditLogEntry) => {
-            batch.set(doc(db, AUDIT_LOGS_COL, log.id), log);
-          });
-          await batch.commit();
-        }
-      }
-
-      // Batch write requests
-      const reqCheck = await getDocs(collection(db, REQUESTS_COL));
-      if (reqCheck.empty) {
-        const reqBatch = writeBatch(db);
-        requests.forEach((r: AttendanceRequest) => {
-          reqBatch.set(doc(db, REQUESTS_COL, r.id), r);
-        });
-        await reqBatch.commit();
-      }
-
-      // Create initial notifications for teacher if empty
-      const notifCheck = await getDocs(collection(db, NOTIFICATIONS_COL));
-      if (notifCheck.empty) {
-        const notifBatch = writeBatch(db);
-        const initialNotifs: AppNotification[] = [
-          {
-            id: 'notif_welcome',
-            recipientId: DEMO_TEACHER.id,
-            title: 'Welcome to AttendEase',
-            message: 'Your Fall 2026 classroom attendance ledger is active with offline sync enabled.',
-            type: 'approval',
-            read: false,
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: 'notif_dispute_1',
-            recipientId: DEMO_TEACHER.id,
-            title: 'New Dispute Raised',
-            message: 'Ananya Iyer submitted a dispute for Distributed Systems period 1.',
-            type: 'dispute',
-            read: false,
-            createdAt: new Date(Date.now() - 3600000).toISOString(),
-          },
-          {
-            id: 'notif_low_ishaan',
-            recipientId: DEMO_TEACHER.id,
-            title: 'Low Attendance Alert',
-            message: 'Ishaan Gupta has dropped to 60.0% (below the required 75% threshold).',
-            type: 'low_attendance',
-            read: false,
-            createdAt: new Date(Date.now() - 7200000).toISOString(),
-          }
-        ];
-        initialNotifs.forEach(n => {
-          notifBatch.set(doc(db, NOTIFICATIONS_COL, n.id), n);
-        });
-        await notifBatch.commit();
-      }
+    // Ensure classroom settings exist (starts clean with 0 students and 0 subjects)
+    if (settingsSnap.empty || force) {
+      if (onProgress) onProgress('Initializing classroom settings...');
+      await setDoc(doc(db, SETTINGS_COL, DEFAULT_SETTINGS.id), DEFAULT_SETTINGS);
     }
 
     return true;
   } catch (err) {
-    console.error('Error seeding database:', err);
-    throw err;
+    console.error('Error initializing database:', err);
+    return false;
   }
+}
+
+/**
+ * Reset Classroom to clean slate (0 students, 0 subjects).
+ * Retains teacher credentials and default settings.
+ */
+export async function resetClassroomToCleanSlate(): Promise<{ deletedUsers: number; deletedSubjects: number }> {
+  // 1. Delete all students and CRs from users collection
+  const usersSnap = await getDocs(collection(db, USERS_COL));
+  let deletedUsers = 0;
+  for (const d of usersSnap.docs) {
+    const u = d.data() as UserProfile;
+    if (u.role !== 'teacher' && d.id !== DEMO_TEACHER.id) {
+      await deleteDoc(doc(db, USERS_COL, d.id));
+      deletedUsers++;
+    }
+  }
+
+  // 2. Delete all subjects
+  const subSnap = await getDocs(collection(db, SUBJECTS_COL));
+  let deletedSubjects = 0;
+  for (const d of subSnap.docs) {
+    await deleteDoc(doc(db, SUBJECTS_COL, d.id));
+    deletedSubjects++;
+  }
+
+  // 3. Clear attendance records and requests
+  try {
+    const attSnap = await getDocs(collection(db, ATTENDANCE_COL));
+    const docs = attSnap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const chunk = docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(cd => batch.delete(doc(db, ATTENDANCE_COL, cd.id)));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('Attendance cleanup notice:', e);
+  }
+
+  try {
+    const reqSnap = await getDocs(collection(db, REQUESTS_COL));
+    if (!reqSnap.empty) {
+      const reqBatch = writeBatch(db);
+      reqSnap.docs.forEach(rd => reqBatch.delete(doc(db, REQUESTS_COL, rd.id)));
+      await reqBatch.commit();
+    }
+  } catch (e) {
+    console.warn('Requests cleanup notice:', e);
+  }
+
+  // 4. Ensure Teacher profile and default settings exist
+  await setDoc(doc(db, USERS_COL, DEMO_TEACHER.id), DEMO_TEACHER, { merge: true });
+  await setDoc(doc(db, SETTINGS_COL, DEFAULT_SETTINGS.id), DEFAULT_SETTINGS, { merge: true });
+
+  return { deletedUsers, deletedSubjects };
 }
 
 /**
@@ -172,7 +139,7 @@ export async function seedDatabaseIfEmpty(
 export async function fetchUsers(): Promise<UserProfile[]> {
   const snap = await getDocs(collection(db, USERS_COL));
   if (snap.empty) {
-    return [DEMO_TEACHER, ...DEMO_STUDENTS];
+    return [DEMO_TEACHER];
   }
   return snap.docs.map(d => d.data() as UserProfile);
 }
@@ -183,7 +150,7 @@ export async function fetchUsers(): Promise<UserProfile[]> {
 export async function fetchSubjects(): Promise<Subject[]> {
   const snap = await getDocs(collection(db, SUBJECTS_COL));
   if (snap.empty) {
-    return DEMO_SUBJECTS;
+    return [];
   }
   return snap.docs.map(d => d.data() as Subject);
 }
@@ -195,7 +162,18 @@ export async function fetchSettings(): Promise<ClassroomSettings> {
   const docRef = doc(db, SETTINGS_COL, DEFAULT_SETTINGS.id);
   const snap = await getDoc(docRef);
   if (snap.exists()) {
-    return snap.data() as ClassroomSettings;
+    const data = snap.data() as ClassroomSettings;
+    // Upgrade to 8 periods if currently configured with fewer
+    if (!data.periodsPerDay || data.periodsPerDay < 8 || !data.dailyPeriodTimings || data.dailyPeriodTimings.length < 8) {
+      const upgraded: ClassroomSettings = {
+        ...data,
+        periodsPerDay: 8,
+        dailyPeriodTimings: DEFAULT_SETTINGS.dailyPeriodTimings,
+      };
+      setDoc(docRef, upgraded, { merge: true }).catch(() => {});
+      return upgraded;
+    }
+    return data;
   }
   return DEFAULT_SETTINGS;
 }
@@ -205,6 +183,142 @@ export async function fetchSettings(): Promise<ClassroomSettings> {
  */
 export async function saveSettings(settings: ClassroomSettings): Promise<void> {
   await setDoc(doc(db, SETTINGS_COL, settings.id), settings);
+}
+
+/**
+ * Fetch Master Timetable schedule from Firestore
+ */
+export async function fetchTimetable(): Promise<TimetableSlot[]> {
+  try {
+    const docRef = doc(db, TIMETABLE_COL, 'active_schedule');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.slots) && data.slots.length > 0) {
+        return data.slots as TimetableSlot[];
+      }
+    }
+  } catch (err) {
+    console.warn('Notice: Firestore timetable lookup failed, using default:', err);
+  }
+  return DEMO_TIMETABLE;
+}
+
+/**
+ * Save updated Master Timetable slots to Firestore
+ */
+export async function saveTimetable(slots: TimetableSlot[], userId?: string): Promise<void> {
+  const docRef = doc(db, TIMETABLE_COL, 'active_schedule');
+  await setDoc(docRef, {
+    id: 'active_schedule',
+    slots,
+    updatedAt: new Date().toISOString(),
+    updatedBy: userId || 'faculty_admin',
+  }, { merge: true });
+}
+
+/**
+ * Automatically calculate and record 1-week attendance based on the timetable schedule.
+ * Maps scheduled classes for Mon-Fri across the 8 periods to real attendance records.
+ */
+export async function generateWeekAttendanceFromTimetable(params: {
+  weekMondayDate: string; // YYYY-MM-DD
+  slots: TimetableSlot[];
+  students: UserProfile[];
+  subjects: Subject[];
+  user: UserProfile;
+  mode?: 'all_present' | 'realistic';
+}): Promise<{ createdSessions: number; createdRecords: number }> {
+  const { weekMondayDate, slots, students, subjects, user, mode = 'realistic' } = params;
+  if (!students || students.length === 0 || !slots || slots.length === 0) {
+    return { createdSessions: 0, createdRecords: 0 };
+  }
+
+  const subjectMap = new Map<string, Subject>();
+  subjects.forEach(s => subjectMap.set(s.id, s));
+
+  // Weekday offset mapping from Monday (0 to 4)
+  const dayOffsets: Record<string, number> = {
+    Monday: 0,
+    Tuesday: 1,
+    Wednesday: 2,
+    Thursday: 3,
+    Friday: 4,
+  };
+
+  // Group slots by day
+  const daySlotMap: Record<string, TimetableSlot[]> = {};
+  slots.forEach(slot => {
+    if (!daySlotMap[slot.day]) daySlotMap[slot.day] = [];
+    daySlotMap[slot.day].push(slot);
+  });
+
+  let createdSessions = 0;
+  let createdRecords = 0;
+
+  for (const [dayName, daySlots] of Object.entries(daySlotMap)) {
+    const offset = dayOffsets[dayName];
+    if (offset === undefined) continue;
+
+    // Calculate YYYY-MM-DD for this day of the week
+    const [y, m, d] = weekMondayDate.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d + offset);
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    for (const slot of daySlots) {
+      if (!slot.subjectName || slot.subjectName.toLowerCase().includes('free period')) {
+        continue;
+      }
+
+      // Find or build subject object
+      const subject = subjectMap.get(slot.subjectId) || {
+        id: slot.subjectId,
+        code: slot.subjectCode || 'GEN101',
+        name: slot.subjectName,
+        teacherName: slot.facultyName || user.name,
+        periodsPerWeek: 4,
+        credits: 3,
+      } as Subject;
+
+      // Assign student statuses
+      const sessionRecords = students.map((student, sIdx) => {
+        let status: AttendanceStatus = 'present';
+        if (mode === 'realistic') {
+          // Semi-random deterministic seed based on student index, period, and day
+          const score = ((sIdx * 37 + slot.period * 19 + offset * 11) % 100);
+          if (score < 6) {
+            status = 'absent';
+          } else if (score < 10) {
+            status = 'leave';
+          } else {
+            status = 'present';
+          }
+        }
+        return {
+          student,
+          status,
+          oldStatus: null as AttendanceStatus | null,
+        };
+      });
+
+      await saveSessionAttendance({
+        date: dateStr,
+        period: slot.period,
+        subject,
+        records: sessionRecords,
+        user,
+        sessionNote: `Timetable Auto-Marked: ${dayName} P${slot.period} (${slot.type})`,
+      });
+
+      createdSessions++;
+      createdRecords += sessionRecords.length;
+    }
+  }
+
+  return { createdSessions, createdRecords };
 }
 
 /**
@@ -614,6 +728,67 @@ export async function submitCRCorrectionRequest(params: {
 }
 
 /**
+ * Submit general CR attendance reversal or correction request
+ */
+export async function submitGeneralCRReversalRequest(params: {
+  cr: UserProfile;
+  student: UserProfile;
+  subject: Subject;
+  date: string;
+  period: number;
+  currentStatus: AttendanceStatus;
+  requestedStatus: AttendanceStatus;
+  reason: string;
+}): Promise<void> {
+  const { cr, student, subject, date, period, currentStatus, requestedStatus, reason } = params;
+  if (!reason.trim()) {
+    throw new Error('Please provide an academic explanation or reason for the reversal.');
+  }
+
+  const recordId = `${date}_${period}_${student.id}`;
+  const reqId = `req_rev_${Date.now()}`;
+
+  const newReq: AttendanceRequest = {
+    id: reqId,
+    type: 'cr_correction',
+    status: 'pending',
+    studentId: student.id,
+    studentName: student.name,
+    rollNumber: student.rollNumber || 'N/A',
+    recordId,
+    subjectId: subject.id,
+    subjectName: subject.name,
+    date,
+    period,
+    currentStatus,
+    requestedStatus,
+    reason: reason.trim(),
+    createdBy: cr.id,
+    createdByName: cr.name,
+    createdByRole: cr.role,
+    createdAt: new Date().toISOString(),
+  };
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, REQUESTS_COL, reqId), newReq);
+
+  // Send Notification to Teacher
+  const notifId = `notif_${Date.now()}`;
+  const notif: AppNotification = {
+    id: notifId,
+    recipientId: DEMO_TEACHER.id,
+    title: 'CR Attendance Reversal Request',
+    message: `${cr.name} requested to reverse ${student.name}'s attendance (${subject.code} on ${date}) from ${currentStatus.toUpperCase()} to ${requestedStatus.toUpperCase()}.`,
+    type: 'correction',
+    read: false,
+    createdAt: new Date().toISOString(),
+  };
+  batch.set(doc(db, NOTIFICATIONS_COL, notifId), notif);
+
+  await batch.commit();
+}
+
+/**
  * Teacher reviews a request (Approve or Reject).
  * If approved: automatically updates affected attendance records and writes append-only audit log.
  */
@@ -667,6 +842,47 @@ export async function reviewRequest(params: {
           oldStatus: oldRec.status,
           newStatus: request.requestedStatus,
           reason: `Approved ${request.type} request: "${request.reason}". Teacher note: ${comment || 'No comment'}`,
+          performedBy: reviewer.id,
+          performedByName: reviewer.name,
+          performedByRole: reviewer.role,
+          timestamp: now,
+        };
+        batch.set(doc(db, AUDIT_LOGS_COL, auditId), auditEntry);
+      } else {
+        // Record was not created yet; create it directly with the approved status
+        const newRecord: AttendanceRecord = {
+          id: request.recordId,
+          studentId: request.studentId,
+          studentName: request.studentName,
+          subjectId: request.subjectId || '',
+          subjectName: request.subjectName || '',
+          date: request.date || new Date().toISOString().split('T')[0],
+          period: request.period || 1,
+          status: request.requestedStatus,
+          markedBy: reviewer.id,
+          markedByName: reviewer.name,
+          markedByRole: reviewer.role,
+          markedAt: now,
+          createdAt: now,
+          updatedAt: now,
+          lastEditedBy: reviewer.id,
+          lastEditedByName: reviewer.name,
+        };
+        batch.set(recordDocRef, newRecord);
+
+        const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const auditEntry: AuditLogEntry = {
+          id: auditId,
+          recordId: request.recordId,
+          studentId: request.studentId,
+          studentName: request.studentName,
+          subjectId: request.subjectId || '',
+          subjectName: request.subjectName || '',
+          date: request.date || new Date().toISOString().split('T')[0],
+          period: request.period || 1,
+          oldStatus: request.currentStatus || 'absent',
+          newStatus: request.requestedStatus,
+          reason: `Approved new ${request.type} request: "${request.reason}". Teacher note: ${comment || 'No comment'}`,
           performedBy: reviewer.id,
           performedByName: reviewer.name,
           performedByRole: reviewer.role,
@@ -1238,4 +1454,109 @@ export async function toggleStudentSignups(allowed: boolean): Promise<void> {
   };
   await saveSettings(updated);
 }
+
+/**
+ * Save or update a student/user profile in Firestore
+ */
+export async function saveUserProfile(user: UserProfile): Promise<void> {
+  const userRef = doc(db, USERS_COL, user.id);
+  await setDoc(userRef, user, { merge: true });
+}
+
+/**
+ * Delete a student/user profile from Firestore
+ */
+export async function deleteUserProfile(userId: string): Promise<void> {
+  const userRef = doc(db, USERS_COL, userId);
+  await deleteDoc(userRef);
+}
+
+/**
+ * Batch add or update students (e.g. from AI roster parsing)
+ */
+export async function batchUpsertStudents(
+  students: Array<Partial<UserProfile> & { name: string; rollNumber: string }>,
+  defaults?: { department?: string; year?: string; section?: string }
+): Promise<number> {
+  if (!students || students.length === 0) return 0;
+
+  const batch = writeBatch(db);
+  let count = 0;
+
+  for (const s of students) {
+    const cleanRoll = s.rollNumber.trim().toUpperCase();
+    const id = s.id || `stud_${cleanRoll.replace(/[^A-Z0-9]/gi, '_')}`;
+    const userDoc: UserProfile = {
+      id,
+      uid: s.uid || id,
+      name: s.name.trim(),
+      email: s.email?.trim() || `${cleanRoll.toLowerCase()}@university.edu`,
+      role: s.isCR ? 'cr' : (s.role || 'student'),
+      status: 'active',
+      rollNumber: cleanRoll,
+      department: s.department || defaults?.department || 'Computer Science & Engineering',
+      year: s.year || defaults?.year || '4th Year',
+      section: s.section || defaults?.section || 'A',
+      isCR: Boolean(s.isCR),
+      phone: s.phone || '',
+    };
+
+    batch.set(doc(db, USERS_COL, id), userDoc, { merge: true });
+    count++;
+  }
+
+  await batch.commit();
+  return count;
+}
+
+/**
+ * Save or update a subject (accessible by Teacher and CR)
+ */
+export async function saveSubject(subject: Subject): Promise<void> {
+  const subRef = doc(db, SUBJECTS_COL, subject.id);
+  await setDoc(subRef, subject, { merge: true });
+}
+
+/**
+ * Delete a subject from Firestore
+ */
+export async function deleteSubject(subjectId: string): Promise<void> {
+  const subRef = doc(db, SUBJECTS_COL, subjectId);
+  await deleteDoc(subRef);
+}
+
+/**
+ * Batch replace or add subjects
+ */
+export async function batchUpsertSubjects(subjects: Subject[]): Promise<void> {
+  if (!subjects || subjects.length === 0) return;
+  const batch = writeBatch(db);
+  for (const sub of subjects) {
+    const subRef = doc(db, SUBJECTS_COL, sub.id);
+    batch.set(subRef, sub, { merge: true });
+  }
+  await batch.commit();
+}
+
+/**
+ * Update Classroom Metadata (name, department, semester, term)
+ */
+export async function updateClassroomDetails(params: {
+  classroomName?: string;
+  department?: string;
+  semester?: string;
+  academicTermName?: string;
+  section?: string;
+}): Promise<void> {
+  const current = await fetchSettings();
+  const updated: ClassroomSettings = {
+    ...current,
+    ...(params.classroomName ? { classroomName: params.classroomName } : {}),
+    ...(params.department ? { department: params.department } : {}),
+    ...(params.semester ? { semester: params.semester } : {}),
+    ...(params.academicTermName ? { academicTermName: params.academicTermName } : {}),
+  };
+  await saveSettings(updated);
+}
+
 

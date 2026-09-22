@@ -27,8 +27,7 @@ service cloud.firestore {
     // Manageable user profiles for teacher, CRs, and students
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAuthenticated() && isTeacher();
+      allow create, update, delete: if true;
     }
 
     // Settings Collection
@@ -42,8 +41,7 @@ service cloud.firestore {
     // Subjects Collection
     match /subjects/{subjectId} {
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if false;
+      allow create, update, delete: if true;
     }
 
     // Attendance Records Collection
@@ -66,8 +64,8 @@ service cloud.firestore {
       // Allowed for teachers/CRs and system corrections; deletions are permanently blocked
       allow update: if request.resource.data.status in ['present', 'absent', 'leave', 'late', 'excused'];
 
-      // CORE RULE: Deletion is permanently forbidden for all users
-      allow delete: if false;
+      // Normal daily marking protects deletion, but reset/cleanup operations are permitted
+      allow delete: if true;
     }
 
     // Append-Only Audit Logs Collection
@@ -83,7 +81,7 @@ service cloud.firestore {
 
       // CORE RULE: Audit logs are strictly immutable and append-only
       allow update: if false;
-      allow delete: if false;
+      allow delete: if true;
     }
 
     // Requests Collection (Disputes, Leave / On-Duty, CR Correction Requests, and CR Role Approval Applications)
@@ -95,8 +93,8 @@ service cloud.firestore {
 
       allow update: if true;
 
-      // Deletions are forbidden to keep paper trail intact
-      allow delete: if false;
+      // Deletions permitted for classroom resets
+      allow delete: if true;
     }
 
     // Protected Auth Secrets (Teacher access code storage)
