@@ -4,7 +4,8 @@ import {
   AttendanceRecord, 
   Subject, 
   AttendanceRequest, 
-  ClassroomSettings 
+  ClassroomSettings,
+  TimetableSlot 
 } from '../types';
 import { DEMO_TIMETABLE } from '../demoData';
 import { 
@@ -34,7 +35,8 @@ interface TeacherDashboardProps {
   students: UserProfile[];
   requests: AttendanceRequest[];
   settings: ClassroomSettings;
-  onNavigateToFastMarking: () => void;
+  timetableSlots?: TimetableSlot[];
+  onNavigateToFastMarking: (subjectId?: string, period?: number) => void;
   onNavigateToTable: () => void;
   onNavigateToRequests: () => void;
   onOpenHistory: (record: AttendanceRecord) => void;
@@ -50,6 +52,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   students,
   requests,
   settings,
+  timetableSlots,
   onNavigateToFastMarking,
   onNavigateToTable,
   onNavigateToRequests,
@@ -127,11 +130,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     return todayRecords.filter(r => r.status === 'absent').length;
   }, [todayRecords]);
 
-  // Today's timetable slots (default to Wednesday or Monday if weekend)
+  // Today's timetable slots (synced with active timetableSlots prop or fallback)
   const todaySlots = useMemo(() => {
     const targetDay = (todayDayName === 'Saturday' || todayDayName === 'Sunday') ? 'Monday' : todayDayName;
-    return DEMO_TIMETABLE.filter(s => s.day === targetDay).sort((a, b) => a.period - b.period);
-  }, [todayDayName]);
+    const source = (timetableSlots && timetableSlots.length > 0) ? timetableSlots : DEMO_TIMETABLE;
+    return source.filter(s => s.day === targetDay).sort((a, b) => a.period - b.period);
+  }, [timetableSlots, todayDayName]);
 
   const periodTimes: Record<number, string> = {
     1: '09:00 - 09:50',
@@ -208,7 +212,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <button
               id="btn_hero_fast_marking"
               type="button"
-              onClick={onNavigateToFastMarking}
+              onClick={() => onNavigateToFastMarking()}
               className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#FAF9F5] text-[#0D3828] hover:bg-white shadow-sm transition-all active:scale-98 cursor-pointer flex items-center gap-2"
             >
               <UserCheck className="w-4 h-4 text-[#13523B]" />
@@ -217,7 +221,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
             <button
               type="button"
-              onClick={onNavigateToDayGrid || onNavigateToFastMarking}
+              onClick={() => {
+                if (onNavigateToDayGrid) onNavigateToDayGrid();
+                else onNavigateToFastMarking();
+              }}
               className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white/10 text-white hover:bg-white/20 border border-white/20 transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Grid className="w-4 h-4 text-emerald-200" />
@@ -312,7 +319,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
             </div>
             <button
-              onClick={onNavigateToFastMarking}
+              onClick={() => onNavigateToFastMarking()}
               className="text-xs text-[#13523B] dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
             >
               <span>Live Roll Call</span>
@@ -370,7 +377,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       </span>
                     ) : isPastOrCurrent ? (
                       <button
-                        onClick={onNavigateToFastMarking}
+                        onClick={() => onNavigateToFastMarking(slot.subjectId, slot.period)}
                         className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#13523B] text-white hover:bg-[#0F4A34] shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                       >
                         <UserCheck className="w-3.5 h-3.5" />
@@ -389,7 +396,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
           <div className="pt-2">
             <button
-              onClick={onNavigateToFastMarking}
+              onClick={() => onNavigateToFastMarking()}
               className="w-full py-2.5 px-4 text-xs font-bold text-[#13523B] dark:text-emerald-400 bg-[#EAF5EF] dark:bg-[#15271F] hover:bg-[#DDF0E5] rounded-xl transition-colors text-center cursor-pointer flex items-center justify-center gap-2"
             >
               <span>Launch Full Period Roll Call Session</span>
@@ -477,7 +484,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
             <div className="space-y-2 text-xs font-semibold">
               <button
-                onClick={onNavigateToDayGrid || onNavigateToFastMarking}
+                onClick={() => {
+                  if (onNavigateToDayGrid) onNavigateToDayGrid();
+                  else onNavigateToFastMarking();
+                }}
                 className="w-full p-3 rounded-xl bg-[#FAF9F5] dark:bg-[#141A17] border border-[#E6E3D8] dark:border-[#28332E] hover:border-[#13523B] flex items-center justify-between text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">

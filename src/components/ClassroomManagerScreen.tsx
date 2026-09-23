@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   UserProfile, 
   Subject, 
@@ -27,7 +27,8 @@ import {
   FileSpreadsheet,
   Layers,
   ArrowRight,
-  School
+  School,
+  ArrowUpDown
 } from 'lucide-react';
 import { 
   batchUpsertStudents, 
@@ -37,7 +38,11 @@ import {
   deleteSubject, 
   batchUpsertSubjects,
   updateClassroomDetails,
-  resetClassroomToCleanSlate
+  resetClassroomToCleanSlate,
+  compareStudentsByRoster,
+  sortStudentsByRoster,
+  fetchSubjects,
+  DEMO_SUBJECTS
 } from '../services/attendanceService';
 
 interface ClassroomManagerScreenProps {
@@ -50,6 +55,8 @@ interface ClassroomManagerScreenProps {
 }
 
 interface ParsedStudentDraft {
+  order?: number;
+  rosterIndex?: number;
   name: string;
   rollNumber: string;
   email: string;
@@ -258,26 +265,37 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
 
     lines.forEach((line, idx) => {
       let studentRoll = '';
-      let studentName = line;
+      let studentName = '';
 
-      // Pattern 1: Roll at beginning e.g. "21CS01 Rahul Sharma" or "21CS01, Rahul Sharma" or "21CS01 - Rahul Sharma"
-      const rollStartMatch = line.match(/^([A-Z0-9_-]{2,15})[\s,:\-–]+(.+)$/i);
-      // Pattern 2: Name at beginning, roll at end e.g. "Rahul Sharma 21CS01"
-      const rollEndMatch = line.match(/^(.+?)[\s,:\-–]+([A-Z0-9_-]{3,15})$/i);
-
-      if (rollStartMatch && /\d/.test(rollStartMatch[1])) {
-        studentRoll = rollStartMatch[1].toUpperCase();
-        studentName = rollStartMatch[2].trim();
-      } else if (rollEndMatch && /\d/.test(rollEndMatch[2])) {
-        studentName = rollEndMatch[1].trim();
-        studentRoll = rollEndMatch[2].toUpperCase();
+      // Check if line is purely an ID / roll number (e.g. "131" or "21CS131")
+      if (/^[A-Z0-9_-]{1,20}$/i.test(line)) {
+        studentRoll = line.toUpperCase();
+        studentName = `Student ${studentRoll}`;
       } else {
-        const currentNum = startNum + idx;
-        studentRoll = `${prefix}${String(currentNum).padStart(padLength, '0')}`;
-        studentName = line.replace(/^\d+[\.\)\s\-]+/, '').trim();
+        // Pattern 1: Roll at beginning e.g. "131 Rahul Sharma", "131. Rahul Sharma", "131) Rahul Sharma", "21CS01 - Rahul Sharma"
+        const rollStartMatch = line.match(/^([A-Z0-9_-]{1,15})[\s,:\-–\.\)\/]+(.+)$/i);
+        // Pattern 2: Name at beginning, roll at end e.g. "Rahul Sharma 21CS01", "John Doe (131)", "John Doe - 131"
+        const rollEndMatch = line.match(/^(.+?)[\s,:\-–\.\(\[\/]+([A-Z0-9_-]{1,15})[\)\]]?$/i);
+
+        if (rollStartMatch && /\d/.test(rollStartMatch[1])) {
+          studentRoll = rollStartMatch[1].toUpperCase();
+          studentName = rollStartMatch[2].trim();
+        } else if (rollEndMatch && /\d/.test(rollEndMatch[2])) {
+          studentName = rollEndMatch[1].trim();
+          studentRoll = rollEndMatch[2].toUpperCase();
+        } else {
+          const currentNum = startNum + idx;
+          studentRoll = `${prefix}${String(currentNum).padStart(padLength, '0')}`;
+          studentName = line.replace(/^\d+[\.\)\s\-]+/, '').trim();
+          if (!studentName) {
+            studentName = `Student ${studentRoll}`;
+          }
+        }
       }
 
       generated.push({
+        order: idx + 1,
+        rosterIndex: idx + 1,
         name: studentName,
         rollNumber: studentRoll,
         email: `${studentRoll.toLowerCase()}@university.edu`,
@@ -287,7 +305,7 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
     });
 
     setDraftStudents(generated);
-    showToast(`Generated draft roster for ${generated.length} students. Inspect below and click "Confirm & Create Classroom".`);
+    showToast(`Generated draft roster for ${generated.length} students (ordered #1 to #${generated.length}). Inspect below and click "Confirm & Create Classroom".`);
   };
 
   // Trigger AI Roster Parsing
@@ -329,7 +347,12 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
       }
 
       if (Array.isArray(data.students) && data.students.length > 0) {
-        setDraftStudents(data.students);
+        const mappedStudents: ParsedStudentDraft[] = data.students.map((s: any, idx: number) => ({
+          ...s,
+          order: typeof s.order === 'number' ? s.order : idx + 1,
+          rosterIndex: typeof s.rosterIndex === 'number' ? s.rosterIndex : idx + 1,
+        }));
+        setDraftStudents(mappedStudents);
         const subCount = Array.isArray(data.subjects) ? data.subjects.length : 0;
         const sourceLabel = resData.source?.startsWith('gemini') ? 'AI' : 'Smart Roster Engine';
         showToast(`Successfully extracted ${data.students.length} students${subCount > 0 ? ` and ${subCount} course subjects` : ''} via ${sourceLabel}. You can inspect and edit below.`);
@@ -364,6 +387,8 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
   const handleAddDraftRow = () => {
     const nextNum = (draftStudents?.length || 0) + 1;
     const newStudent: ParsedStudentDraft = {
+      order: nextNum,
+      rosterIndex: nextNum,
       rollNumber: `CS26${String(nextNum).padStart(2, '0')}`,
       name: '',
       email: '',
@@ -371,6 +396,18 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
       isCR: false,
     };
     setDraftStudents([...(draftStudents || []), newStudent]);
+  };
+
+  // Sort draft students by Roll Number in ascending natural order
+  const handleSortDraftByRoll = () => {
+    if (!draftStudents || draftStudents.length === 0) return;
+    const sorted = [...draftStudents].sort((a, b) => {
+      const rollA = (a.rollNumber || '').trim();
+      const rollB = (b.rollNumber || '').trim();
+      return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' }) || (a.name || '').localeCompare(b.name || '');
+    }).map((s, idx) => ({ ...s, order: idx + 1, rosterIndex: idx + 1 }));
+    setDraftStudents(sorted);
+    showToast('Draft roster sorted sequentially by roll number.');
   };
 
   // Apply AI parsed roster to Firestore & live app
@@ -381,11 +418,12 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
     setErrorMessage(null);
 
     try {
-      // 1. Batch save students
+      // 1. Batch save students with replaceExisting: true so previous old students are cleanly replaced
       await batchUpsertStudents(draftStudents, {
         department: targetDepartment,
         section: targetSection,
         year: '4th Year',
+        replaceExisting: true,
       });
 
       // 2. Update classroom settings
@@ -395,19 +433,24 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
         section: targetSection,
       });
 
-      // 3. If subjects detected, update them as well
+      // 3. Ensure curriculum subjects exist so attendance can be marked immediately
       if (draftSubjects && draftSubjects.length > 0) {
         const newSubjects: Subject[] = draftSubjects.map((s, idx) => ({
           id: `sub_${s.code.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
           code: s.code,
           name: s.name,
-          teacherName: s.facultyName || currentUser.name || 'Prof. Ananya Sharma',
+          teacherName: s.facultyName || currentUser.name || 'Faculty In-Charge',
           periodsPerWeek: 4,
           color: ['#13523B', '#0F4A34', '#1E40AF', '#B45309', '#047857'][idx % 5],
           roomNumber: targetClassroomName.split(',')[0] || 'LH-302',
           credits: s.credits || 4,
         }));
         await batchUpsertSubjects(newSubjects);
+      } else {
+        const existingSubs = await fetchSubjects();
+        if (existingSubs.length === 0) {
+          await batchUpsertSubjects(DEMO_SUBJECTS);
+        }
       }
 
       showToast(`Classroom "${targetClassroomName}" created with ${draftStudents.length} students! Ready for attendance marking.`);
@@ -467,11 +510,15 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
       const isCR = studentFormData.role === 'cr' || studentFormData.isCR;
       const targetId = editingStudent ? editingStudent.id : `stud_${studentFormData.rollNumber.replace(/[^A-Z0-9]/gi, '_')}`;
 
+      const highestOrder = students.reduce((max, s) => Math.max(max, typeof s.order === 'number' ? s.order : 0), 0);
+
       const userProfile: UserProfile = {
         id: targetId,
         uid: editingStudent ? editingStudent.uid : targetId,
         name: studentFormData.name.trim(),
         rollNumber: studentFormData.rollNumber.trim().toUpperCase(),
+        order: editingStudent?.order ?? (highestOrder + 1),
+        rosterIndex: editingStudent?.rosterIndex ?? (highestOrder + 1),
         email: studentFormData.email.trim() || `${studentFormData.rollNumber.toLowerCase()}@university.edu`,
         phone: studentFormData.phone.trim(),
         role: isCR ? 'cr' : 'student',
@@ -727,11 +774,15 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
     }
   };
 
-  const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
-    (s.rollNumber || '').toLowerCase().includes(studentSearch.toLowerCase()) ||
-    (s.email || '').toLowerCase().includes(studentSearch.toLowerCase())
-  );
+  const filteredStudents = useMemo(() => {
+    return students
+      .filter(s => 
+        s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+        (s.rollNumber || '').toLowerCase().includes(studentSearch.toLowerCase()) ||
+        (s.email || '').toLowerCase().includes(studentSearch.toLowerCase())
+      )
+      .sort(compareStudentsByRoster);
+  }, [students, studentSearch]);
 
   return (
     <div id="classroom_manager_container" className="max-w-6xl mx-auto space-y-6 pb-20">
@@ -1136,6 +1187,16 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={handleSortDraftByRoll}
+                    className="px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    title="Sort draft students sequentially by roll number"
+                  >
+                    <ArrowUpDown className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Sort by Roll #</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleAddDraftRow}
                     className="px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center gap-1.5"
                   >
@@ -1330,7 +1391,7 @@ CS408 - Artificial Intelligence & Neural Networks (Dr. S. Roy, 4 Credits)
                           </td>
                         </tr>
                       ) : (
-                        filteredStudents.map((stu, idx) => (
+                        filteredStudents.map((stu: UserProfile, idx: number) => (
                           <tr key={stu.id} className="hover:bg-neutral-50/80 dark:hover:bg-neutral-900/50 transition-colors">
                             <td className="p-3 text-center text-neutral-400 font-mono">{idx + 1}</td>
                             <td className="p-3">

@@ -5,7 +5,8 @@ import {
   AttendanceRecord, 
   AttendanceRequest, 
   ClassroomSettings,
-  AuditLogEntry 
+  AuditLogEntry,
+  TimetableSlot 
 } from './types';
 import { 
   DEMO_TEACHER, 
@@ -19,7 +20,9 @@ import {
   fetchUsers, 
   fetchSubjects, 
   fetchSettings, 
-  fetchRecordAuditLogs 
+  fetchRecordAuditLogs,
+  compareStudentsByRoster,
+  fetchTimetable
 } from './services/attendanceService';
 import { db } from './firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
@@ -91,6 +94,7 @@ export default function App() {
   // Application Data States - Starts with faculty administrator and 0 students / 0 subjects
   const [users, setUsers] = useState<UserProfile[]>([DEMO_TEACHER]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>([]);
   const [settings, setSettings] = useState<ClassroomSettings>(DEFAULT_SETTINGS);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [requests, setRequests] = useState<AttendanceRequest[]>([]);
@@ -142,17 +146,25 @@ export default function App() {
   // Manual refresh helper
   const handleRefreshData = async () => {
     try {
-      const [loadedUsers, loadedSubjects, loadedSettings] = await Promise.all([
+      const [loadedUsers, loadedSubjects, loadedSettings, loadedSlots] = await Promise.all([
         fetchUsers(),
         fetchSubjects(),
         fetchSettings(),
+        fetchTimetable(),
       ]);
       setUsers(loadedUsers.length ? loadedUsers : [DEMO_TEACHER]);
       setSubjects(loadedSubjects);
       if (loadedSettings) setSettings(loadedSettings);
+      if (loadedSlots && loadedSlots.length > 0) setTimetableSlots(loadedSlots);
     } catch (err) {
       console.warn('Data refresh error:', err);
     }
+  };
+
+  // Timetable update callback
+  const handleTimetableUpdated = async (newSlots: TimetableSlot[]) => {
+    setTimetableSlots(newSlots);
+    await handleRefreshData();
   };
 
   // Save current user to localStorage
@@ -177,14 +189,16 @@ export default function App() {
       try {
         setIsSeeding(true);
         await seedDatabaseIfEmpty();
-        const [loadedUsers, loadedSubjects, loadedSettings] = await Promise.all([
+        const [loadedUsers, loadedSubjects, loadedSettings, loadedSlots] = await Promise.all([
           fetchUsers(),
           fetchSubjects(),
           fetchSettings(),
+          fetchTimetable(),
         ]);
         setUsers(loadedUsers.length ? loadedUsers : [DEMO_TEACHER]);
         setSubjects(loadedSubjects);
         if (loadedSettings) setSettings(loadedSettings);
+        if (loadedSlots && loadedSlots.length > 0) setTimetableSlots(loadedSlots);
       } catch (err) {
         console.warn('Init error:', err);
       } finally {
@@ -214,7 +228,7 @@ export default function App() {
     const qUsers = query(collection(db, 'users'));
     const unsubUsers = onSnapshot(qUsers, (snap) => {
       const uList = snap.docs.map(d => ({ ...d.data(), id: d.id }) as UserProfile);
-      setUsers(uList.length ? uList : [DEMO_TEACHER]);
+      setUsers(uList.length ? uList.sort(compareStudentsByRoster) : [DEMO_TEACHER]);
     }, (err) => console.warn('Users sync:', err));
 
     // 4. Subjects listener
@@ -289,10 +303,14 @@ export default function App() {
     );
   }
 
-  // Students list (excluding teacher)
-  const studentsList = users.filter(u => u.role === 'student' || u.role === 'cr');
-  const validStudentIds = new Set(studentsList.map(s => s.id));
-  const activeAttendanceRecords = attendanceRecords.filter(r => validStudentIds.has(r.studentId));
+  // Students list (excluding teacher, strictly sorted by roster order & roll number)
+  const studentsList = users
+    .filter(u => u.role === 'student' || u.role === 'cr')
+    .sort(compareStudentsByRoster);
+  const validStudentIds = new Set(studentsList.flatMap(s => [s.id, s.uid, s.rollNumber].filter(Boolean)));
+  const activeAttendanceRecords = attendanceRecords.filter(r => 
+    validStudentIds.size === 0 || validStudentIds.has(r.studentId) || (r.rollNumber && validStudentIds.has(r.rollNumber))
+  );
 
   return (
     <AcademicLayout
@@ -315,7 +333,10 @@ export default function App() {
           students={studentsList}
           requests={requests}
           settings={settings}
-          onNavigateToFastMarking={() => setActiveScreen('fast_marking')}
+          timetableSlots={timetableSlots}
+          onNavigateToFastMarking={(subId, period) => {
+            handleNavigateToMarking(subId, period, 'single');
+          }}
           onNavigateToTable={() => setActiveScreen('table')}
           onNavigateToRequests={() => setActiveScreen('requests')}
           onOpenHistory={handleOpenHistory}
@@ -332,9 +353,11 @@ export default function App() {
           students={studentsList}
           settings={settings}
           records={activeAttendanceRecords}
+          timetableSlots={timetableSlots}
           initialMode="day_grid"
           onSaved={() => setActiveScreen('table')}
           onNavigateToTable={() => setActiveScreen('table')}
+          onRefreshData={handleRefreshData}
         />
       )}
 
@@ -345,11 +368,13 @@ export default function App() {
           students={studentsList}
           settings={settings}
           records={activeAttendanceRecords}
+          timetableSlots={timetableSlots}
           initialMode="single"
           initialSubjectId={markingPreload.subjectId}
           initialPeriod={markingPreload.period}
           onSaved={() => setActiveScreen('table')}
           onNavigateToTable={() => setActiveScreen('table')}
+          onRefreshData={handleRefreshData}
         />
       )}
 
@@ -390,6 +415,8 @@ export default function App() {
           students={studentsList}
           attendanceRecords={activeAttendanceRecords}
           settings={settings}
+          initialSlots={timetableSlots}
+          onTimetableUpdated={handleTimetableUpdated}
           onRefreshData={handleRefreshData}
           onNavigateToMarking={(subId, period) => {
             handleNavigateToMarking(subId, period, 'single');

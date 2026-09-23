@@ -23,9 +23,26 @@ import {
   Subject, 
   AttendanceStatus, 
   ClassroomSettings,
-  AttendanceRecord 
+  AttendanceRecord,
+  TimetableSlot
 } from '../types';
-import { saveSessionAttendance, saveSingleStudentPeriodAttendance } from '../services/attendanceService';
+import { 
+  saveSessionAttendance, 
+  saveSingleStudentPeriodAttendance, 
+  compareStudentsByRoster,
+  fetchTimetable
+} from '../services/attendanceService';
+
+const DEFAULT_FALLBACK_SUBJECT: Subject = {
+  id: 'sub_general',
+  code: 'GEN101',
+  name: 'Core Classroom Session',
+  teacherName: 'Faculty In-Charge',
+  periodsPerWeek: 4,
+  color: '#13523B',
+  roomNumber: 'LH-302',
+  credits: 4,
+};
 
 interface FastMarkingScreenProps {
   currentUser: UserProfile;
@@ -33,11 +50,13 @@ interface FastMarkingScreenProps {
   students: UserProfile[];
   settings: ClassroomSettings;
   records: AttendanceRecord[];
+  timetableSlots?: TimetableSlot[];
   initialMode?: 'single' | 'day_grid';
   initialSubjectId?: string;
   initialPeriod?: number;
   onSaved: () => void;
   onNavigateToTable: () => void;
+  onRefreshData?: () => Promise<void> | void;
 }
 
 export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
@@ -46,11 +65,13 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
   students,
   settings,
   records,
+  timetableSlots,
   initialMode = 'single',
   initialSubjectId,
   initialPeriod,
   onSaved,
   onNavigateToTable,
+  onRefreshData,
 }) => {
   // Today in YYYY-MM-DD
   const todayStr = useMemo(() => {
@@ -70,6 +91,21 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     }
   }, [initialMode]);
 
+  // Active Timetable Slots State with auto-load from Firestore/local storage
+  const [activeSlots, setActiveSlots] = useState<TimetableSlot[]>(timetableSlots || []);
+
+  useEffect(() => {
+    if (timetableSlots && timetableSlots.length > 0) {
+      setActiveSlots(timetableSlots);
+    } else {
+      fetchTimetable().then(slots => {
+        if (slots && slots.length > 0) {
+          setActiveSlots(slots);
+        }
+      });
+    }
+  }, [timetableSlots]);
+
   // Total periods configured (default 8)
   const totalPeriods = useMemo(() => {
     return settings.periodsPerDay || 8;
@@ -82,9 +118,84 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
   // Selected Date, Period, and Subject
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [selectedPeriod, setSelectedPeriod] = useState<number>(initialPeriod || 1);
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
-    initialSubjectId || subjects[0]?.id || 'sub_cs401'
-  );
+
+  // Helper to get day name for date string
+  const getDayOfWeekName = (dateStr: string): 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday' => {
+    if (!dateStr) return 'Monday';
+    const [yyyy, mm, dd] = dateStr.split('-').map(Number);
+    const d = new Date(yyyy, mm - 1, dd);
+    const days: ('Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday')[] = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
+    ];
+    return days[d.getDay()];
+  };
+
+  // Find slot currently scheduled in Timetable for selected Date and Period
+  const scheduledSlot = useMemo(() => {
+    const rawDay = getDayOfWeekName(selectedDate);
+    // If weekend, map to Monday for scheduling preview
+    const targetDay = (rawDay === 'Saturday' || rawDay === 'Sunday') ? 'Monday' : rawDay;
+    return activeSlots.find(
+      s => s.day === targetDay && s.period === selectedPeriod
+    );
+  }, [activeSlots, selectedDate, selectedPeriod]);
+
+  // Combine subjects prop with any unique subjects defined in the active timetable
+  const allSelectableSubjects = useMemo(() => {
+    const map = new Map<string, Subject>();
+    subjects.forEach(s => {
+      map.set(s.id, s);
+      if (s.code) map.set(s.code.trim().toUpperCase(), s);
+    });
+
+    // If scheduled slot subject is not yet in subjects, inject it dynamically
+    if (scheduledSlot && scheduledSlot.subjectCode) {
+      const codeKey = scheduledSlot.subjectCode.trim().toUpperCase();
+      if (!map.has(scheduledSlot.subjectId) && !map.has(codeKey)) {
+        const injected: Subject = {
+          id: scheduledSlot.subjectId || `sub_${codeKey.toLowerCase()}`,
+          code: scheduledSlot.subjectCode,
+          name: scheduledSlot.subjectName || scheduledSlot.subjectCode,
+          teacherName: scheduledSlot.facultyName || 'Faculty In-Charge',
+          periodsPerWeek: 4,
+          color: '#13523B',
+          roomNumber: scheduledSlot.room || 'LH-302',
+          credits: scheduledSlot.type === 'Lab' ? 2 : 4,
+        };
+        map.set(injected.id, injected);
+      }
+    }
+
+    // Return unique values by id
+    const seenIds = new Set<string>();
+    const list: Subject[] = [];
+    map.forEach(sub => {
+      if (!seenIds.has(sub.id)) {
+        seenIds.add(sub.id);
+        list.push(sub);
+      }
+    });
+
+    return list.length > 0 ? list : [DEFAULT_FALLBACK_SUBJECT];
+  }, [subjects, scheduledSlot]);
+
+  // Calculate default initial subject ID synced to scheduled slot
+  const computeScheduledSubjectId = (): string => {
+    if (initialSubjectId && allSelectableSubjects.some(s => s.id === initialSubjectId)) {
+      return initialSubjectId;
+    }
+    if (scheduledSlot) {
+      const match = allSelectableSubjects.find(s => 
+        s.id === scheduledSlot.subjectId || 
+        (s.code && scheduledSlot.subjectCode && s.code.trim().toUpperCase() === scheduledSlot.subjectCode.trim().toUpperCase())
+      );
+      if (match) return match.id;
+      if (scheduledSlot.subjectId) return scheduledSlot.subjectId;
+    }
+    return allSelectableSubjects[0]?.id || 'sub_general';
+  };
+
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(computeScheduledSubjectId);
 
   // Student roster state for this session: studentId -> status
   const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>({});
@@ -110,12 +221,17 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     records.forEach(r => {
       if (r.date === selectedDate) {
         map.set(`${r.period}_${r.studentId}`, r);
+        if (r.rollNumber) {
+          map.set(`${r.period}_${r.rollNumber}`, r);
+        }
       }
     });
     return map;
   }, [records, selectedDate]);
 
-  // When Date or Period changes in Single Period View, load existing saved statuses or default to Present
+  // When Date or Period changes in Single Period View:
+  // 1. Load existing saved statuses if session was already marked
+  // 2. OR automatically sync selectedSubjectId to the timetable's scheduled subject for that day & period!
   useEffect(() => {
     const existingPeriodRecords = records.filter(
       r => r.date === selectedDate && r.period === selectedPeriod
@@ -126,15 +242,20 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
 
     if (existingPeriodRecords.length > 0) {
       setIsExistingSession(true);
-      // Populate from existing saved records
+      // Map both by studentId and rollNumber
+      const recordByIdOrRoll = new Map<string, AttendanceRecord>();
       existingPeriodRecords.forEach(r => {
-        nextStatusMap[r.studentId] = r.status;
-        nextOriginalMap[r.studentId] = r.status;
+        recordByIdOrRoll.set(r.studentId, r);
+        if (r.rollNumber) recordByIdOrRoll.set(r.rollNumber, r);
       });
 
-      // Any students missing in existing record default to present
+      // Populate from existing saved records
       students.forEach(s => {
-        if (!nextStatusMap[s.id]) {
+        const found = recordByIdOrRoll.get(s.id) || (s.rollNumber ? recordByIdOrRoll.get(s.rollNumber) : undefined);
+        if (found) {
+          nextStatusMap[s.id] = found.status;
+          nextOriginalMap[s.id] = found.status;
+        } else {
           nextStatusMap[s.id] = 'present';
           nextOriginalMap[s.id] = null;
         }
@@ -142,7 +263,7 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
 
       // Auto-set subject if present on existing records
       const savedSubjectId = existingPeriodRecords[0]?.subjectId;
-      if (savedSubjectId && subjects.some(s => s.id === savedSubjectId)) {
+      if (savedSubjectId) {
         setSelectedSubjectId(savedSubjectId);
       }
     } else {
@@ -152,26 +273,69 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
         nextStatusMap[s.id] = 'present';
         nextOriginalMap[s.id] = null;
       });
+
+      // SYNC WITH TIMETABLE: Auto-select scheduled subject for this period & day
+      const rawDay = getDayOfWeekName(selectedDate);
+      const targetDay = (rawDay === 'Saturday' || rawDay === 'Sunday') ? 'Monday' : rawDay;
+      const scheduled = activeSlots.find(
+        s => s.day === targetDay && s.period === selectedPeriod
+      );
+
+      if (scheduled) {
+        const match = allSelectableSubjects.find(s => 
+          s.id === scheduled.subjectId || 
+          (s.code && scheduled.subjectCode && s.code.trim().toUpperCase() === scheduled.subjectCode.trim().toUpperCase()) ||
+          s.name.trim().toLowerCase() === scheduled.subjectName.trim().toLowerCase()
+        );
+        if (match) {
+          setSelectedSubjectId(match.id);
+        } else if (scheduled.subjectId) {
+          setSelectedSubjectId(scheduled.subjectId);
+        }
+      }
     }
 
     setStatusMap(nextStatusMap);
     setOriginalStatusMap(nextOriginalMap);
-  }, [selectedDate, selectedPeriod, records, students, subjects]);
+  }, [selectedDate, selectedPeriod, records, students, activeSlots, allSelectableSubjects]);
 
   // Selected subject object
-  const currentSubject = subjects.find(s => s.id === selectedSubjectId) || subjects[0];
+  const currentSubject = allSelectableSubjects.find(s => s.id === selectedSubjectId) || allSelectableSubjects[0] || DEFAULT_FALLBACK_SUBJECT;
 
   // Helper to determine subject for a given period in Day View
   const getSubjectForPeriod = (periodNum: number): Subject => {
-    // If any record exists for this date and period, use its subject
+    // 1. If any record exists for this date and period, use its subject
     for (const [key, rec] of dayRecordsMap.entries()) {
       if (rec.period === periodNum) {
-        const found = subjects.find(s => s.id === rec.subjectId);
+        const found = allSelectableSubjects.find(s => s.id === rec.subjectId);
         if (found) return found;
       }
     }
-    // Otherwise fallback to cycle through subjects or default
-    return subjects[(periodNum - 1) % subjects.length] || currentSubject;
+    // 2. Lookup scheduled class from master timetable for this day of week!
+    const rawDay = getDayOfWeekName(selectedDate);
+    const targetDay = (rawDay === 'Saturday' || rawDay === 'Sunday') ? 'Monday' : rawDay;
+    const scheduled = activeSlots.find(
+      s => s.day === targetDay && s.period === periodNum
+    );
+    if (scheduled) {
+      const match = allSelectableSubjects.find(s => 
+        s.id === scheduled.subjectId || 
+        (s.code && scheduled.subjectCode && s.code.trim().toUpperCase() === scheduled.subjectCode.trim().toUpperCase())
+      );
+      if (match) return match;
+      return {
+        id: scheduled.subjectId || `sub_${(scheduled.subjectCode || 'GEN').toLowerCase()}`,
+        code: scheduled.subjectCode || 'GEN',
+        name: scheduled.subjectName || 'Class Session',
+        teacherName: scheduled.facultyName || 'Faculty In-Charge',
+        periodsPerWeek: 4,
+        color: '#13523B',
+        roomNumber: scheduled.room || 'LH-302',
+        credits: scheduled.type === 'Lab' ? 2 : 4,
+      };
+    }
+    // 3. Fallback to currentSubject
+    return currentSubject || DEFAULT_FALLBACK_SUBJECT;
   };
 
   // Quick action: Mark all present for the current single period
@@ -226,11 +390,12 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     return { present, absent, leave, total: students.length };
   }, [students, statusMap]);
 
-  // Filtered student list for quick find
+  // Filtered student list for quick find (strictly ordered from starting roll number / given order)
   const filteredStudents = useMemo(() => {
-    if (!searchQuery.trim()) return students;
+    const sorted = [...students].sort(compareStudentsByRoster);
+    if (!searchQuery.trim()) return sorted;
     const q = searchQuery.toLowerCase().trim();
-    return students.filter(s => 
+    return sorted.filter(s => 
       s.name.toLowerCase().includes(q) || 
       (s.rollNumber && s.rollNumber.toLowerCase().includes(q))
     );
@@ -238,7 +403,12 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
 
   // Save single period session attendance
   const handleSaveSession = async () => {
-    if (!currentSubject) return;
+    if (students.length === 0) {
+      setErrorMessage('No enrolled students found in this classroom. Please add students in Classroom Manager first.');
+      return;
+    }
+
+    const subjectToUse = currentSubject || subjects[0] || DEFAULT_FALLBACK_SUBJECT;
 
     // Check CR same-day edit constraint
     if (currentUser.role === 'cr' && isExistingSession && selectedDate !== todayStr) {
@@ -261,7 +431,7 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
       await saveSessionAttendance({
         date: selectedDate,
         period: selectedPeriod,
-        subject: currentSubject,
+        subject: subjectToUse,
         records: recordsToSave,
         user: currentUser,
         sessionNote: isExistingSession ? `Period ${selectedPeriod} corrections saved` : undefined,
@@ -272,7 +442,7 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
       setTimeout(() => {
         setSaveSuccess(false);
         onSaved();
-      }, 900);
+      }, 700);
     } catch (err: any) {
       console.error('Error saving fast attendance:', err);
       setErrorMessage(err.message || 'Failed to save attendance records.');
@@ -283,7 +453,7 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
 
   // DAY VIEW: Tap a single cell to cycle status: not_marked -> present -> absent -> leave -> present
   const handleDayViewCellTap = async (student: UserProfile, period: number) => {
-    const existingRec = dayRecordsMap.get(`${period}_${student.id}`);
+    const existingRec = dayRecordsMap.get(`${period}_${student.id}`) || (student.rollNumber ? dayRecordsMap.get(`${period}_${student.rollNumber}`) : undefined);
     const currentStatus: AttendanceStatus | 'not_marked' = existingRec ? existingRec.status : 'not_marked';
 
     let nextStatus: AttendanceStatus;
@@ -292,7 +462,7 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     else if (currentStatus === 'absent') nextStatus = 'leave';
     else nextStatus = 'present';
 
-    const periodSubject = getSubjectForPeriod(period);
+    const periodSubject = getSubjectForPeriod(period) || currentSubject || DEFAULT_FALLBACK_SUBJECT;
 
     try {
       await saveSingleStudentPeriodAttendance({
@@ -316,11 +486,11 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
 
   // DAY VIEW COLUMN SHORTCUT: Mark entire period All Present or All Absent
   const handleColumnShortcut = async (period: number, status: AttendanceStatus) => {
-    const periodSubject = getSubjectForPeriod(period);
+    const periodSubject = getSubjectForPeriod(period) || currentSubject || DEFAULT_FALLBACK_SUBJECT;
     setIsSaving(true);
     try {
       const recordsToSave = students.map(st => {
-        const existing = dayRecordsMap.get(`${period}_${st.id}`);
+        const existing = dayRecordsMap.get(`${period}_${st.id}`) || (st.rollNumber ? dayRecordsMap.get(`${period}_${st.rollNumber}`) : undefined);
         return {
           student: st,
           status,
@@ -350,8 +520,8 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
     setIsSaving(true);
     try {
       for (const p of periodsList) {
-        const existing = dayRecordsMap.get(`${p}_${student.id}`);
-        const periodSubject = getSubjectForPeriod(p);
+        const existing = dayRecordsMap.get(`${p}_${student.id}`) || (student.rollNumber ? dayRecordsMap.get(`${p}_${student.rollNumber}`) : undefined);
+        const periodSubject = getSubjectForPeriod(p) || currentSubject || DEFAULT_FALLBACK_SUBJECT;
         await saveSingleStudentPeriodAttendance({
           student,
           date: selectedDate,
@@ -485,26 +655,70 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
             </div>
 
             {/* 3. Subject Selector */}
-            <div>
-              <label className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-1">
-                3. Subject for Period {selectedPeriod}
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="select_subject" className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+                  3. Subject for Period {selectedPeriod}
+                </label>
+                {scheduledSlot && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                    <Sparkles className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                    Timetable Synced
+                  </span>
+                )}
+              </div>
+
               <div className="relative">
                 <select
                   id="select_subject"
                   value={selectedSubjectId}
                   onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="w-full appearance-none pl-9 pr-8 py-2 text-xs font-semibold rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full appearance-none pl-9 pr-8 py-2 text-xs font-semibold rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-[#13523B]"
                 >
-                  {subjects.map(s => (
+                  {allSelectableSubjects.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.code}: {s.name}
+                      {s.code}: {s.name} ({s.teacherName || 'Faculty'})
                     </option>
                   ))}
                 </select>
                 <BookOpen className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5 pointer-events-none" />
                 <ChevronDown className="w-4 h-4 text-neutral-400 absolute right-2.5 top-2.5 pointer-events-none" />
               </div>
+
+              {/* Real-time Timetable Scheduled Indicator */}
+              {scheduledSlot && (
+                <div className="p-2.5 rounded-xl bg-[#EAF5EF] dark:bg-[#15271F] border border-[#BEE0CE] dark:border-[#1E3B2E] flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center gap-2 text-[#0D3828] dark:text-emerald-200">
+                    <Calendar className="w-3.5 h-3.5 text-[#13523B] dark:text-emerald-400 shrink-0" />
+                    <span>
+                      <strong className="font-semibold">{scheduledSlot.day} Period {selectedPeriod}:</strong>{' '}
+                      <span className="font-mono font-bold text-[#13523B] dark:text-emerald-300">{scheduledSlot.subjectCode}</span> — {scheduledSlot.subjectName}{' '}
+                      <span className="text-neutral-500 dark:text-neutral-400">({scheduledSlot.room || 'LH-302'}, {scheduledSlot.facultyName})</span>
+                    </span>
+                  </div>
+
+                  {currentSubject.code?.toUpperCase() !== scheduledSlot.subjectCode?.toUpperCase() ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const match = allSelectableSubjects.find(s => 
+                          s.id === scheduledSlot.subjectId || 
+                          s.code?.toUpperCase() === scheduledSlot.subjectCode?.toUpperCase()
+                        );
+                        if (match) setSelectedSubjectId(match.id);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-[#13523B] text-white font-bold hover:bg-[#0E422F] text-[10px] shrink-0 cursor-pointer shadow-xs transition-colors"
+                    >
+                      Sync to Scheduled ({scheduledSlot.subjectCode})
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-bold text-[#13523B] dark:text-emerald-300 flex items-center gap-1 shrink-0 bg-white/60 dark:bg-black/20 px-2 py-0.5 rounded-full border border-emerald-300/60 dark:border-emerald-700/60">
+                      <Check className="w-3 h-3 text-[#13523B] dark:text-emerald-400" />
+                      Active Timetable Subject
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>
@@ -772,18 +986,28 @@ export const FastMarkingScreen: React.FC<FastMarkingScreenProps> = ({
                   {/* Period Columns (P1, P2, P3...) */}
                   {periodsList.map((p) => {
                     const timing = settings.dailyPeriodTimings?.[p - 1]?.time;
+                    const periodSubject = getSubjectForPeriod(p);
                     return (
                       <th
                         key={p}
                         scope="col"
-                        className="px-3 py-2.5 min-w-[110px] text-center border-b border-r border-neutral-200 dark:border-neutral-700"
+                        className="px-3 py-2.5 min-w-[120px] text-center border-b border-r border-neutral-200 dark:border-neutral-700"
                       >
                         <div className="flex flex-col items-center">
                           <span className="font-extrabold text-neutral-900 dark:text-white text-xs">
                             Period {p}
                           </span>
+                          <span 
+                            className="text-[11px] font-mono font-bold text-[#13523B] dark:text-emerald-400 truncate max-w-[110px]"
+                            title={`${periodSubject.code}: ${periodSubject.name} (${periodSubject.teacherName})`}
+                          >
+                            {periodSubject.code}
+                          </span>
+                          <span className="text-[9px] text-neutral-400 truncate max-w-[110px]">
+                            {periodSubject.name}
+                          </span>
                           {timing && (
-                            <span className="text-[10px] text-neutral-400 font-mono">
+                            <span className="text-[10px] text-neutral-400 font-mono mt-0.5">
                               {timing.split('-')[0].trim()}
                             </span>
                           )}

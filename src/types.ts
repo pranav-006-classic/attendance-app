@@ -12,6 +12,8 @@ export interface UserProfile {
   role: UserRole;
   status?: UserAccountStatus; // 'active' by default, 'pending' for CRs until teacher approves
   rollNumber?: string;
+  order?: number; // Preserves exact user-defined input order
+  rosterIndex?: number; // Sequential index in class roster
   avatarUrl?: string;
   phone?: string;
   isCR?: boolean;

@@ -11,8 +11,11 @@ import {
   fetchTimetable, 
   saveTimetable, 
   generateWeekAttendanceFromTimetable,
-  saveSubject 
+  saveSubject,
+  batchUpsertSubjects,
+  syncTimetableSubjects 
 } from '../services/attendanceService';
+import { REAL_LIFE_TIMETABLE_PRESETS, TimetablePreset } from '../timetablePresets';
 import { 
   Calendar, 
   Clock, 
@@ -48,6 +51,8 @@ interface MasterTimetableScreenProps {
   students?: UserProfile[];
   attendanceRecords: AttendanceRecord[];
   settings: ClassroomSettings;
+  initialSlots?: TimetableSlot[];
+  onTimetableUpdated?: (slots: TimetableSlot[]) => Promise<void> | void;
   onRefreshData?: () => Promise<void> | void;
   onNavigateToMarking?: (subjectId?: string, period?: number) => void;
   onNavigateToTable?: (subjectId?: string) => void;
@@ -59,6 +64,8 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
   students = [],
   attendanceRecords,
   settings,
+  initialSlots,
+  onTimetableUpdated,
   onRefreshData,
   onNavigateToMarking,
   onNavigateToTable,
@@ -76,12 +83,18 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
   }, [settings.dailyPeriodTimings]);
 
   // Timetable slots state (persisted to Firestore)
-  const [slots, setSlots] = useState<TimetableSlot[]>(DEMO_TIMETABLE);
+  const [slots, setSlots] = useState<TimetableSlot[]>(() => {
+    if (initialSlots && initialSlots.length > 0) return initialSlots;
+    return DEMO_TIMETABLE;
+  });
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Real-life Timetable Examples Modal State
+  const [isPresetModalOpen, setIsPresetModalOpen] = useState(false);
 
   // Active view tab: 'all_week', 'day_focus', or 'week_calculator'
   const [activeTab, setActiveTab] = useState<'all_week' | 'day_focus' | 'week_calculator'>('all_week');
@@ -169,6 +182,12 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
       await saveTimetable(newSlots, currentUser.id);
       setHasUnsavedChanges(false);
       setSaveSuccess(true);
+      if (onTimetableUpdated) {
+        await onTimetableUpdated(newSlots);
+      }
+      if (onRefreshData) {
+        await onRefreshData();
+      }
       if (toastMsg) showToast(toastMsg);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (err: any) {
@@ -183,6 +202,47 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
 
   const handleSaveTimetable = async () => {
     await persistSlots(slots, 'Timetable saved and synchronized to cloud!');
+  };
+
+  // Apply a full real-life timetable preset (CSE, IT, ECE)
+  const handleApplyPreset = async (preset: TimetablePreset) => {
+    setIsSaving(true);
+    try {
+      // 1. Batch upsert subjects so they are immediately available
+      if (preset.subjects && preset.subjects.length > 0) {
+        await batchUpsertSubjects(preset.subjects);
+      }
+      // 2. Persist all 40 slots (auto-syncs derived subjects too)
+      await persistSlots(
+        preset.slots,
+        `Loaded "${preset.name}"! ${preset.subjects.length} subjects & full weekly schedule active.`
+      );
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+      setIsPresetModalOpen(false);
+    } catch (err: any) {
+      console.error('Error applying preset:', err);
+      showToast('Error applying preset: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Manually ensure all current timetable subjects are registered in subjects ledger
+  const handleManualSyncSubjects = async () => {
+    setIsSaving(true);
+    try {
+      const synced = await syncTimetableSubjects(slots);
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+      showToast(`Synchronized ${synced.length} subjects with timetable! Attendance marking is now aligned.`);
+    } catch (err: any) {
+      showToast('Sync error: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Drag and Drop handlers
@@ -613,6 +673,33 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Real-Life Timetable Examples Button */}
+            {canEdit && (
+              <button
+                id="btn_open_preset_modal"
+                onClick={() => setIsPresetModalOpen(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-[#13523B] dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all cursor-pointer shadow-xs"
+                title="Load real-life university & engineering timetable examples"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Real-Life Timetable Examples</span>
+              </button>
+            )}
+
+            {/* Sync Subjects Button */}
+            {canEdit && (
+              <button
+                id="btn_sync_timetable_subjects"
+                onClick={handleManualSyncSubjects}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-[#1C2420] text-neutral-700 dark:text-neutral-200 border border-[#E6E3D8] dark:border-[#28332E] hover:bg-[#F2EFE8] dark:hover:bg-[#232C27] transition-all cursor-pointer"
+                title="Ensure all subjects from timetable exist in subject ledger"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-neutral-500" />
+                <span>Sync Subjects</span>
+              </button>
+            )}
+
             {/* AI Image Scan Timetable Button */}
             {canEdit && (
               <button
@@ -1666,6 +1753,105 @@ export const MasterTimetableScreen: React.FC<MasterTimetableScreenProps> = ({
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REAL-LIFE TIMETABLE EXAMPLES MODAL */}
+      {isPresetModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-[#13523B] dark:text-emerald-400">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-neutral-900 dark:text-white font-serif">
+                    Real-Life Engineering Timetable Examples
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    Load a complete accredited curriculum with 8 daily periods, specialized courses, labs, and faculty.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPresetModalOpen(false)}
+                className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                Selecting any example automatically synchronizes all <strong>curriculum subjects</strong>, <strong>course codes</strong>, and the <strong>8-period Monday–Friday schedule</strong> directly into attendance marking and the ledger.
+              </p>
+
+              <div className="space-y-4">
+                {REAL_LIFE_TIMETABLE_PRESETS.map((preset) => (
+                  <div
+                    key={preset.id}
+                    className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/40 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm text-neutral-900 dark:text-white">
+                            {preset.name}
+                          </h4>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">
+                            {preset.department}
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                          {preset.description} • <strong className="text-neutral-700 dark:text-neutral-200">{preset.academicTerm}</strong>
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(preset)}
+                        disabled={isSaving}
+                        className="px-4 py-2 text-xs font-bold rounded-xl bg-[#13523B] hover:bg-[#0E422F] text-white shadow-xs flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Apply This Timetable</span>
+                      </button>
+                    </div>
+
+                    {/* Courses preview pills */}
+                    <div className="space-y-1.5 pt-1 border-t border-neutral-200/60 dark:border-neutral-700/60">
+                      <span className="text-[10px] font-semibold uppercase text-neutral-400">
+                        Included Courses ({preset.subjects.length}):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {preset.subjects.map((sub) => (
+                          <span
+                            key={sub.id}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 shadow-2xs"
+                          >
+                            <span className="font-mono font-bold text-[#13523B] dark:text-emerald-400">{sub.code}:</span>
+                            <span>{sub.name}</span>
+                            <span className="text-neutral-400 text-[10px]">({sub.teacherName})</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsPresetModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

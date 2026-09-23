@@ -34,6 +34,15 @@ import {
   DEMO_TIMETABLE
 } from '../demoData';
 
+export { 
+  DEMO_TEACHER, 
+  DEMO_CRS, 
+  DEMO_STUDENTS, 
+  DEMO_SUBJECTS, 
+  DEFAULT_SETTINGS, 
+  DEMO_TIMETABLE
+};
+
 // Collection references
 const USERS_COL = 'users';
 const SUBJECTS_COL = 'subjects';
@@ -52,9 +61,10 @@ export async function seedDatabaseIfEmpty(
   force: boolean = false
 ): Promise<boolean> {
   try {
-    const [usersSnap, settingsSnap] = await Promise.all([
+    const [usersSnap, settingsSnap, subjectsSnap] = await Promise.all([
       getDocs(collection(db, USERS_COL)),
       getDocs(collection(db, SETTINGS_COL)),
+      getDocs(collection(db, SUBJECTS_COL)),
     ]);
 
     // Ensure faculty administrator profile exists
@@ -63,10 +73,20 @@ export async function seedDatabaseIfEmpty(
       await setDoc(doc(db, USERS_COL, DEMO_TEACHER.id), DEMO_TEACHER);
     }
 
-    // Ensure classroom settings exist (starts clean with 0 students and 0 subjects)
+    // Ensure classroom settings exist
     if (settingsSnap.empty || force) {
       if (onProgress) onProgress('Initializing classroom settings...');
       await setDoc(doc(db, SETTINGS_COL, DEFAULT_SETTINGS.id), DEFAULT_SETTINGS);
+    }
+
+    // Ensure core curriculum subjects exist so classes always have courses to record attendance for
+    if (subjectsSnap.empty || force) {
+      if (onProgress) onProgress('Initializing academic curriculum subjects...');
+      const subBatch = writeBatch(db);
+      DEMO_SUBJECTS.forEach(sub => {
+        subBatch.set(doc(db, SUBJECTS_COL, sub.id), sub);
+      });
+      await subBatch.commit();
     }
 
     return true;
@@ -133,6 +153,49 @@ export async function resetClassroomToCleanSlate(): Promise<{ deletedUsers: numb
 }
 
 /**
+ * Natural comparison function for students:
+ * 1. Respects user-defined input order (order / rosterIndex)
+ * 2. Natural alphanumeric sort on rollNumber (e.g. 131 before 132 ... 139 before 140 before 141)
+ * 3. Fallback to student full name
+ */
+export function compareStudentsByRoster(a: UserProfile, b: UserProfile): number {
+  // If either is a teacher, keep teacher at top if needed, otherwise students first
+  if (a.role === 'teacher' && b.role !== 'teacher') return -1;
+  if (b.role === 'teacher' && a.role !== 'teacher') return 1;
+
+  // 1. Explicit input order preserved from roster import or batch creation
+  const orderA = typeof a.order === 'number' ? a.order : (typeof a.rosterIndex === 'number' ? a.rosterIndex : null);
+  const orderB = typeof b.order === 'number' ? b.order : (typeof b.rosterIndex === 'number' ? b.rosterIndex : null);
+
+  if (orderA !== null && orderB !== null && orderA !== orderB) {
+    return orderA - orderB;
+  }
+
+  // 2. Natural alphanumeric sort on rollNumber
+  const rollA = (a.rollNumber || '').trim();
+  const rollB = (b.rollNumber || '').trim();
+
+  if (rollA && rollB) {
+    const rollCmp = rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
+    if (rollCmp !== 0) return rollCmp;
+  } else if (rollA) {
+    return -1;
+  } else if (rollB) {
+    return 1;
+  }
+
+  // 3. Fallback to student name natural sort
+  return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+}
+
+/**
+ * Return a copy of students sorted by the user's defined roster order & roll number
+ */
+export function sortStudentsByRoster(students: UserProfile[]): UserProfile[] {
+  return [...students].sort(compareStudentsByRoster);
+}
+
+/**
  * Fetch all users
  */
 export async function fetchUsers(): Promise<UserProfile[]> {
@@ -140,18 +203,29 @@ export async function fetchUsers(): Promise<UserProfile[]> {
   if (snap.empty) {
     return [DEMO_TEACHER];
   }
-  return snap.docs.map(d => d.data() as UserProfile);
+  const users = snap.docs.map(d => d.data() as UserProfile);
+  return users.sort(compareStudentsByRoster);
 }
 
 /**
  * Fetch all subjects
  */
 export async function fetchSubjects(): Promise<Subject[]> {
-  const snap = await getDocs(collection(db, SUBJECTS_COL));
-  if (snap.empty) {
-    return [];
+  try {
+    const snap = await getDocs(collection(db, SUBJECTS_COL));
+    if (snap.empty) {
+      const batch = writeBatch(db);
+      DEMO_SUBJECTS.forEach(sub => {
+        batch.set(doc(db, SUBJECTS_COL, sub.id), sub);
+      });
+      await batch.commit().catch(() => {});
+      return DEMO_SUBJECTS;
+    }
+    return snap.docs.map(d => d.data() as Subject);
+  } catch (err) {
+    console.warn('Error loading subjects from Firestore, using default courses:', err);
+    return DEMO_SUBJECTS;
   }
-  return snap.docs.map(d => d.data() as Subject);
 }
 
 /**
@@ -185,6 +259,95 @@ export async function saveSettings(settings: ClassroomSettings): Promise<void> {
 }
 
 const TIMETABLE_LOCAL_KEY = 'attendeease_timetable_active';
+
+/**
+ * Extract clean Subject definitions from an active set of TimetableSlots
+ */
+export function extractSubjectsFromTimetableSlots(slots: TimetableSlot[], existingSubjects: Subject[] = []): Subject[] {
+  const existingMap = new Map<string, Subject>();
+  existingSubjects.forEach(s => {
+    existingMap.set(s.id, s);
+    if (s.code) existingMap.set(s.code.trim().toUpperCase(), s);
+  });
+
+  const subjectMap = new Map<string, Subject>();
+  const countMap = new Map<string, number>();
+
+  const colorPalette = [
+    '#13523B', // Academic Emerald
+    '#0F4A34', // Deep Forest Green
+    '#1E40AF', // Royal Indigo
+    '#B45309', // Warm Ochre
+    '#047857', // Forest
+    '#6D28D9', // Deep Purple
+    '#0369A1', // Aegean Slate Blue
+    '#BE185D', // Crimson Berry
+  ];
+
+  slots.forEach(slot => {
+    if (!slot.subjectCode && !slot.subjectName) return;
+    const cleanCode = (slot.subjectCode || 'GEN').trim().toUpperCase();
+    const cleanName = (slot.subjectName || cleanCode).trim();
+    if (
+      cleanName.toLowerCase() === 'free period' || 
+      cleanName.toLowerCase() === 'break' || 
+      cleanName.toLowerCase() === 'lunch' ||
+      cleanName.toLowerCase() === 'library'
+    ) {
+      return;
+    }
+
+    const key = cleanCode;
+    countMap.set(key, (countMap.get(key) || 0) + 1);
+
+    if (!subjectMap.has(key)) {
+      const match = existingMap.get(slot.subjectId) || existingMap.get(cleanCode);
+      const subId = match ? match.id : (slot.subjectId || `sub_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`);
+      const color = match?.color || colorPalette[subjectMap.size % colorPalette.length];
+      
+      subjectMap.set(key, {
+        id: subId,
+        code: cleanCode,
+        name: cleanName,
+        teacherName: slot.facultyName || match?.teacherName || 'Faculty In-Charge',
+        periodsPerWeek: 1,
+        color,
+        roomNumber: slot.room || match?.roomNumber || 'LH-302',
+        credits: slot.type === 'Lab' ? 2 : 4,
+      });
+    }
+  });
+
+  // Update periodsPerWeek
+  const result: Subject[] = [];
+  subjectMap.forEach((sub, key) => {
+    sub.periodsPerWeek = countMap.get(key) || 4;
+    result.push(sub);
+  });
+
+  return result;
+}
+
+/**
+ * Synchronize all courses in the Timetable slots with the Firestore subjects collection
+ */
+export async function syncTimetableSubjects(slots: TimetableSlot[]): Promise<Subject[]> {
+  if (!slots || slots.length === 0) {
+    return fetchSubjects();
+  }
+
+  try {
+    const existing = await fetchSubjects();
+    const extracted = extractSubjectsFromTimetableSlots(slots, existing);
+    if (extracted.length > 0) {
+      await batchUpsertSubjects(extracted);
+    }
+    return fetchSubjects();
+  } catch (err) {
+    console.warn('Notice: Could not sync timetable subjects to Firestore:', err);
+    return fetchSubjects();
+  }
+}
 
 /**
  * Fetch Master Timetable schedule from Firestore with instant local cache fallback
@@ -222,6 +385,7 @@ export async function fetchTimetable(): Promise<TimetableSlot[]> {
 
 /**
  * Save updated Master Timetable slots to Firestore and local cache simultaneously
+ * Also auto-synchronizes any new or updated subjects from the timetable into the subjects collection
  */
 export async function saveTimetable(slots: TimetableSlot[], userId?: string): Promise<void> {
   // 1. Immediately cache to localStorage so UI never loses changes across tabs/refreshes
@@ -239,6 +403,13 @@ export async function saveTimetable(slots: TimetableSlot[], userId?: string): Pr
     updatedAt: new Date().toISOString(),
     updatedBy: userId || 'faculty_admin',
   }, { merge: true });
+
+  // 3. Automatically ensure all subjects appearing in the timetable exist in subjects collection
+  try {
+    await syncTimetableSubjects(slots);
+  } catch (syncErr) {
+    console.warn('Auto-syncing timetable subjects error:', syncErr);
+  }
 }
 
 /**
@@ -353,74 +524,88 @@ export async function generateWeekAttendanceFromTimetable(params: {
 export async function saveSessionAttendance(params: {
   date: string;
   period: number;
-  subject: Subject;
+  subject?: Subject | null;
   records: { student: UserProfile; status: AttendanceStatus; oldStatus?: AttendanceStatus | null }[];
   user: UserProfile;
   sessionNote?: string;
 }): Promise<void> {
   const { date, period, subject, records, user, sessionNote } = params;
+  if (!records || records.length === 0) return;
+
   const now = new Date().toISOString();
-  const batch = writeBatch(db);
+  const subId = subject?.id || 'sub_general';
+  const subName = subject?.name || 'Classroom Session';
+  const userId = user?.id || user?.uid || 'faculty_admin';
+  const userName = user?.name || 'Faculty In-Charge';
+  const userRole = user?.role || 'teacher';
 
-  records.forEach(({ student, status, oldStatus }) => {
-    // Unique key: ${date}_${period}_${student.id}
-    const recordId = `${date}_${period}_${student.id}`;
-    const recordDocRef = doc(db, ATTENDANCE_COL, recordId);
+  // Chunk operations to respect Firestore's 500-operation per batch limit
+  // Each student can have up to 2 operations (record + audit log entry)
+  const CHUNK_SIZE = 150;
+  for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+    const chunk = records.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
 
-    const recordData: AttendanceRecord = {
-      id: recordId,
-      studentId: student.id,
-      studentName: student.name,
-      rollNumber: student.rollNumber,
-      subjectId: subject.id,
-      subjectName: subject.name,
-      subject: subject.name,
-      date,
-      period,
-      periodNumber: period,
-      status,
-      markedBy: user.id,
-      markedByName: user.name,
-      markedByRole: user.role,
-      markedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      lastEditedAt: now,
-      lastEditedBy: user.id,
-      lastEditedByName: user.name,
-    };
+    chunk.forEach(({ student, status, oldStatus }) => {
+      const studentId = student.id || student.uid || `stud_${(student.rollNumber || '').replace(/[^A-Z0-9]/gi, '_')}`;
+      const recordId = `${date}_${period}_${studentId}`;
+      const recordDocRef = doc(db, ATTENDANCE_COL, recordId);
 
-    batch.set(recordDocRef, recordData, { merge: true });
-
-    // Append-only audit log: log when status changes or on initial creation
-    if (oldStatus !== status) {
-      const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const auditDocRef = doc(db, AUDIT_LOGS_COL, auditId);
-      const auditEntry: AuditLogEntry = {
-        id: auditId,
-        recordId,
-        studentId: student.id,
-        studentName: student.name,
-        subjectId: subject.id,
-        subjectName: subject.name,
+      const recordData: AttendanceRecord = {
+        id: recordId,
+        studentId,
+        studentName: student.name || `Student ${student.rollNumber || ''}`,
+        rollNumber: student.rollNumber || '',
+        subjectId: subId,
+        subjectName: subName,
+        subject: subName,
         date,
         period,
-        oldStatus: oldStatus ?? null,
-        newStatus: status,
-        reason: oldStatus
-          ? `Period ${period} updated by ${user.name}: ${oldStatus} -> ${status}`
-          : (sessionNote ? `Session marked: ${sessionNote}` : `Class roll call session marked for Period ${period} by ${user.role.toUpperCase()}: ${user.name}`),
-        performedBy: user.id,
-        performedByName: user.name,
-        performedByRole: user.role,
-        timestamp: now,
+        periodNumber: period,
+        status,
+        markedBy: userId,
+        markedByName: userName,
+        markedByRole: userRole,
+        markedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        lastEditedAt: now,
+        lastEditedBy: userId,
+        lastEditedByName: userName,
       };
 
-      batch.set(auditDocRef, auditEntry);
-    }
-  });
+      batch.set(recordDocRef, recordData, { merge: true });
 
-  await batch.commit();
+      // Append-only audit log: log when status changes or on initial creation
+      if (oldStatus !== status) {
+        const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const auditDocRef = doc(db, AUDIT_LOGS_COL, auditId);
+        const auditEntry: AuditLogEntry = {
+          id: auditId,
+          recordId,
+          studentId,
+          studentName: student.name || `Student ${student.rollNumber || ''}`,
+          subjectId: subId,
+          subjectName: subName,
+          date,
+          period,
+          oldStatus: oldStatus ?? null,
+          newStatus: status,
+          reason: oldStatus
+            ? `Period ${period} updated by ${userName}: ${oldStatus} -> ${status}`
+            : (sessionNote ? `Session marked: ${sessionNote}` : `Class roll call session marked for Period ${period} by ${userRole.toUpperCase()}: ${userName}`),
+          performedBy: userId,
+          performedByName: userName,
+          performedByRole: userRole,
+          timestamp: now,
+        };
+
+        batch.set(auditDocRef, auditEntry);
+      }
+    });
+
+    await batch.commit();
+  }
 }
 
 /**
@@ -431,7 +616,7 @@ export async function saveSingleStudentPeriodAttendance(params: {
   student: UserProfile;
   date: string;
   period: number;
-  subject: Subject;
+  subject?: Subject | null;
   status: AttendanceStatus;
   user: UserProfile;
   oldStatus?: AttendanceStatus | null;
@@ -439,30 +624,37 @@ export async function saveSingleStudentPeriodAttendance(params: {
 }): Promise<void> {
   const { student, date, period, subject, status, oldStatus, user, reason } = params;
   const now = new Date().toISOString();
-  const recordId = `${date}_${period}_${student.id}`;
+  const studentId = student.id || student.uid || `stud_${(student.rollNumber || '').replace(/[^A-Z0-9]/gi, '_')}`;
+  const recordId = `${date}_${period}_${studentId}`;
+  const subId = subject?.id || 'sub_general';
+  const subName = subject?.name || 'Classroom Session';
+  const userId = user?.id || user?.uid || 'faculty_admin';
+  const userName = user?.name || 'Faculty In-Charge';
+  const userRole = user?.role || 'teacher';
+
   const batch = writeBatch(db);
 
   const recordData: AttendanceRecord = {
     id: recordId,
-    studentId: student.id,
-    studentName: student.name,
-    rollNumber: student.rollNumber,
-    subjectId: subject.id,
-    subjectName: subject.name,
-    subject: subject.name,
+    studentId,
+    studentName: student.name || `Student ${student.rollNumber || ''}`,
+    rollNumber: student.rollNumber || '',
+    subjectId: subId,
+    subjectName: subName,
+    subject: subName,
     date,
     period,
     periodNumber: period,
     status,
-    markedBy: user.id,
-    markedByName: user.name,
-    markedByRole: user.role,
+    markedBy: userId,
+    markedByName: userName,
+    markedByRole: userRole,
     markedAt: now,
     createdAt: now,
     updatedAt: now,
     lastEditedAt: now,
-    lastEditedBy: user.id,
-    lastEditedByName: user.name,
+    lastEditedBy: userId,
+    lastEditedByName: userName,
   };
 
   batch.set(doc(db, ATTENDANCE_COL, recordId), recordData, { merge: true });
@@ -471,18 +663,18 @@ export async function saveSingleStudentPeriodAttendance(params: {
   const auditEntry: AuditLogEntry = {
     id: auditId,
     recordId,
-    studentId: student.id,
-    studentName: student.name,
-    subjectId: subject.id,
-    subjectName: subject.name,
+    studentId,
+    studentName: student.name || `Student ${student.rollNumber || ''}`,
+    subjectId: subId,
+    subjectName: subName,
     date,
     period,
     oldStatus: oldStatus ?? null,
     newStatus: status,
     reason: reason || (oldStatus ? `Period ${period} status updated to ${status}` : `Period ${period} marked as ${status}`),
-    performedBy: user.id,
-    performedByName: user.name,
-    performedByRole: user.role,
+    performedBy: userId,
+    performedByName: userName,
+    performedByRole: userRole,
     timestamp: now,
   };
 
@@ -1496,40 +1688,67 @@ export async function deleteUserProfile(userId: string): Promise<void> {
 }
 
 /**
- * Batch add or update students (e.g. from AI roster parsing)
+ * Batch add or update students (e.g. from AI roster parsing or quick generator)
  */
 export async function batchUpsertStudents(
   students: Array<Partial<UserProfile> & { name: string; rollNumber: string }>,
-  defaults?: { department?: string; year?: string; section?: string }
+  defaults?: { department?: string; year?: string; section?: string; replaceExisting?: boolean }
 ): Promise<number> {
   if (!students || students.length === 0) return 0;
 
-  const batch = writeBatch(db);
-  let count = 0;
-
-  for (const s of students) {
-    const cleanRoll = s.rollNumber.trim().toUpperCase();
-    const id = s.id || `stud_${cleanRoll.replace(/[^A-Z0-9]/gi, '_')}`;
-    const userDoc: UserProfile = {
-      id,
-      uid: s.uid || id,
-      name: s.name.trim(),
-      email: s.email?.trim() || `${cleanRoll.toLowerCase()}@university.edu`,
-      role: s.isCR ? 'cr' : (s.role || 'student'),
-      status: 'active',
-      rollNumber: cleanRoll,
-      department: s.department || defaults?.department || 'Computer Science & Engineering',
-      year: s.year || defaults?.year || '4th Year',
-      section: s.section || defaults?.section || 'A',
-      isCR: Boolean(s.isCR),
-      phone: s.phone || '',
-    };
-
-    batch.set(doc(db, USERS_COL, id), userDoc, { merge: true });
-    count++;
+  // If replaceExisting requested, remove existing student/cr records first so new classroom is completely clean
+  if (defaults?.replaceExisting) {
+    const existingUsers = await getDocs(collection(db, USERS_COL));
+    const deleteBatch = writeBatch(db);
+    let deleteCount = 0;
+    for (const d of existingUsers.docs) {
+      const u = d.data() as UserProfile;
+      if (u.role !== 'teacher' && d.id !== DEMO_TEACHER.id) {
+        deleteBatch.delete(doc(db, USERS_COL, d.id));
+        deleteCount++;
+      }
+    }
+    if (deleteCount > 0) {
+      await deleteBatch.commit();
+    }
   }
 
-  await batch.commit();
+  let count = 0;
+  const CHUNK_SIZE = 400;
+
+  for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+    const chunk = students.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+
+    for (let cIdx = 0; cIdx < chunk.length; cIdx++) {
+      const globalIdx = i + cIdx;
+      const s = chunk[cIdx];
+      const cleanRoll = s.rollNumber.trim().toUpperCase();
+      const id = s.id || `stud_${cleanRoll.replace(/[^A-Z0-9]/gi, '_')}`;
+      const userDoc: UserProfile = {
+        id,
+        uid: s.uid || id,
+        name: s.name.trim(),
+        email: s.email?.trim() || `${cleanRoll.toLowerCase()}@university.edu`,
+        role: s.isCR ? 'cr' : (s.role || 'student'),
+        status: 'active',
+        rollNumber: cleanRoll,
+        order: typeof s.order === 'number' ? s.order : globalIdx + 1,
+        rosterIndex: typeof s.rosterIndex === 'number' ? s.rosterIndex : globalIdx + 1,
+        department: s.department || defaults?.department || 'Computer Science & Engineering',
+        year: s.year || defaults?.year || '4th Year',
+        section: s.section || defaults?.section || 'A',
+        isCR: Boolean(s.isCR),
+        phone: s.phone || '',
+      };
+
+      batch.set(doc(db, USERS_COL, id), userDoc, { merge: true });
+      count++;
+    }
+
+    await batch.commit();
+  }
+
   return count;
 }
 

@@ -24,6 +24,7 @@ import {
   UserProfile,
   ClassroomSettings 
 } from '../types';
+import { compareStudentsByRoster } from '../services/attendanceService';
 
 interface AttendanceTableProps {
   records: AttendanceRecord[];
@@ -174,9 +175,17 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
       // If student role, only process their records
       if (currentUser.role === 'student' && rec.studentId !== currentUser.id) return;
 
-      let entry = map.get(rec.studentId);
+      const targetStudent = activeStudentList.find(s => 
+        s.id === rec.studentId || 
+        s.uid === rec.studentId ||
+        (s.rollNumber && rec.rollNumber && s.rollNumber.trim().toUpperCase() === rec.rollNumber.trim().toUpperCase()) ||
+        (s.rollNumber && s.rollNumber.trim().toUpperCase() === rec.studentId.trim().toUpperCase())
+      );
+      const studentKey = targetStudent ? targetStudent.id : rec.studentId;
+
+      let entry = map.get(studentKey);
       if (!entry) {
-        const st = students.find(s => s.id === rec.studentId) || {
+        const st = targetStudent || {
           id: rec.studentId,
           name: rec.studentName,
           email: '',
@@ -192,7 +201,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
           percentage: 100,
           bySubject: {},
         };
-        map.set(rec.studentId, entry);
+        map.set(studentKey, entry);
       }
 
       entry.total++;
@@ -222,7 +231,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
       });
     });
 
-    return Array.from(map.values()).sort((a, b) => a.percentage - b.percentage);
+    return Array.from(map.values()).sort((a, b) => compareStudentsByRoster(a.student, b.student));
   }, [records, students, currentUser]);
 
   // Select all toggles
@@ -482,7 +491,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                 className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white"
               >
                 <option value="all">All Classroom Students</option>
-                {students.map(s => (
+                {[...students].sort(compareStudentsByRoster).map(s => (
                   <option key={s.id} value={s.id}>{s.name} ({s.rollNumber})</option>
                 ))}
               </select>
